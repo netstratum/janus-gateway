@@ -2448,6 +2448,27 @@ static void janus_videoroom_notify_participants(janus_videoroom_publisher *parti
 	}
 }
 
+static void janus_videoroom_notify_participants_remb(janus_videoroom_publisher *participant, json_t *bitrate) {
+	/* participant->room->mutex has to be locked. */
+	if(participant->room == NULL)
+		return;
+	GHashTableIter iter;
+	gpointer value;
+	g_hash_table_iter_init(&iter, participant->room->participants);
+	while (participant->room && !g_atomic_int_get(&participant->room->destroyed) && g_hash_table_iter_next(&iter, NULL, &value)) {
+		janus_videoroom_publisher *p = value;
+		if(p && p->session) {
+			p->bitrate = json_integer_value(bitrate);
+			JANUS_LOG(LOG_WARN, "HOOLVATEST: Setting video bitrate: %"SCNu32" (room %s, user %s)\n",
+				p->bitrate, p->room_id_str, p->user_id_str);
+			/* Send a new REMB */
+			if(p->session->started)
+			p->remb_latest = janus_get_monotonic_time();
+			gateway->send_remb(p->session->handle, p->bitrate);
+		}
+	}
+}
+
 static void janus_videoroom_participant_joining(janus_videoroom_publisher *p) {
 	/* we need to check if the room still exists, may have been destroyed already */
 	if(p->room == NULL)
@@ -4467,8 +4488,8 @@ struct janus_plugin_result *janus_videoroom_handle_message(janus_plugin_session 
 		/* We got a response, send it back */
 		goto plugin_response;
 	} else if(!strcasecmp(request_text, "join") || !strcasecmp(request_text, "joinandconfigure")
-			|| !strcasecmp(request_text, "configure") || !strcasecmp(request_text, "publish") || !strcasecmp(request_text, "unpublish")
-			|| !strcasecmp(request_text, "start") || !strcasecmp(request_text, "pause") || !strcasecmp(request_text, "switch")
+			|| !strcasecmp(request_text, "configure") || !strcasecmp(request_text, "configureall") || !strcasecmp(request_text, "publish") || !strcasecmp(request_text, "unpublish")
+			|| !strcasecmp(request_text, "start") || !strcasecmp(request_text, "pause") || !strcasecmp(request_text, "pauseall") || !strcasecmp(request_text, "switch") || !strcasecmp(request_text, "switchall")
 			|| !strcasecmp(request_text, "leave")) {
 		/* These messages are handled asynchronously */
 
@@ -4540,7 +4561,7 @@ admin_response:
 			if(!response) {
 				/* Prepare JSON error event */
 				response = json_object();
-				json_object_set_new(response, "videoroom", json_string("event"));
+				json_object_set_new(response, "streaming", json_string("event"));
 				json_object_set_new(response, "error_code", json_integer(error_code));
 				json_object_set_new(response, "error", json_string(error_cause));
 			}
@@ -5033,6 +5054,15 @@ void janus_videoroom_slow_link(janus_plugin_session *handle, int uplink, int vid
 			gateway->push_event(session->handle, &janus_videoroom_plugin, NULL, event, NULL);
 			json_decref(event);
 			janus_refcount_decrease(&publisher->ref);
+			
+			if (bitrate >= 64000) {
+				publisher->bitrate = bitrate/2;
+				/* Send a new REMB */
+				if(session->started)
+					publisher->remb_latest = janus_get_monotonic_time();
+				JANUS_LOG(LOG_WARN, "HOOLVATEST: [%s]: publisher: bitrate: [%d]\n",publisher->display, publisher->bitrate);
+				gateway->send_remb(session->handle, publisher->bitrate);
+			}
 		} else {
 			JANUS_LOG(LOG_WARN, "Got a slow uplink on a VideoRoom publisher? Weird, because it doesn't receive media...\n");
 		}
@@ -5049,6 +5079,9 @@ void janus_videoroom_slow_link(janus_plugin_session *handle, int uplink, int vid
 			json_object_set_new(event, "videoroom", json_string("slow_link"));
 			gateway->push_event(session->handle, &janus_videoroom_plugin, NULL, event, NULL);
 			json_decref(event);
+			if (viewer->video_offered) {
+				viewer->video = FALSE;
+			}
 		} else {
 			JANUS_LOG(LOG_WARN, "Got a slow downlink on a VideoRoom viewer? Weird, because it doesn't send media...\n");
 		}
@@ -5173,6 +5206,7 @@ static void janus_videoroom_hangup_subscriber(janus_videoroom_subscriber *s) {
 			janus_mutex_lock(&owner->own_subscriptions_mutex);
 			/* Note: we should refcount these subscription-publisher mappings as well */
 			owner->subscriptions = g_slist_remove(owner->subscriptions, s);
+			JANUS_LOG(LOG_WARN, "HOOLVATEST: %s subscription removed\n", owner->display);
 			janus_mutex_unlock(&owner->own_subscriptions_mutex);
 		}
 		janus_mutex_unlock(&room->mutex);
@@ -5556,7 +5590,7 @@ static void *janus_videoroom_handler(void *data) {
 				}
 				if(bitrate) {
 					publisher->bitrate = json_integer_value(bitrate);
-					JANUS_LOG(LOG_VERB, "Setting video bitrate: %"SCNu32" (room %s, user %s)\n",
+					JANUS_LOG(LOG_WARN, "HOOLVATEST: Setting video bitrate: %"SCNu32" (room %s, user %s)\n",
 						publisher->bitrate, publisher->room_id_str, publisher->user_id_str);
 				}
 				if(record) {
@@ -5819,6 +5853,7 @@ static void *janus_videoroom_handler(void *data) {
 					if(owner != NULL) {
 						/* Note: we should refcount these subscription-publisher mappings as well */
 						janus_mutex_lock(&owner->own_subscriptions_mutex);
+						JANUS_LOG(LOG_WARN, "HOOLVATEST: %s subscription append\n", owner->display);
 						owner->subscriptions = g_slist_append(owner->subscriptions, subscriber);
 						janus_mutex_unlock(&owner->own_subscriptions_mutex);
 						/* Done adding the subscription, owner is safe to be released */
@@ -5909,6 +5944,162 @@ static void *janus_videoroom_handler(void *data) {
 				error_code = JANUS_VIDEOROOM_ERROR_ALREADY_JOINED;
 				g_snprintf(error_cause, 512, "Already in as a publisher on this handle");
 				goto error;
+			} else if(!strcasecmp(request_text, "switchall")) {
+				/* server isn't sending all publisher streams to this participant */
+
+				JANUS_VALIDATE_JSON_OBJECT(root, publish_parameters,
+					error_code, error_cause, TRUE,
+					JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT);
+				if(error_code != 0) {
+					janus_refcount_decrease(&participant->ref);
+					goto error;
+				}
+
+				json_t *publishers = json_object_get(root, "publishers");
+
+				if(publishers) {
+					JANUS_LOG(LOG_WARN, "HOOLVATEST: All Subscriber's fridged\n");
+					if(json_array_size(publishers) > 0) {
+						if(session->started) {
+							janus_mutex_lock(&participant->own_subscriptions_mutex);
+							GSList *ps = participant->subscriptions;
+							size_t i = 0;
+							size_t array_size = json_array_size(publishers);
+							while(ps) {
+								janus_videoroom_subscriber *l = (janus_videoroom_subscriber *)ps->data;
+								if(l && l->video_offered) {
+									JANUS_LOG(LOG_WARN, "HOOLVATEST: [%s]: checking [%s] publisher\n",participant->display, l->feed->display);
+
+									for(i=0; i<array_size; i++) {
+										json_t *a = json_array_get(publishers, i);
+										if(!a || !json_is_integer(a)) {
+											JANUS_LOG(LOG_ERR, "Invalid element in the publishers array (not a integer)\n");
+											//error_code = JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT;
+											//g_snprintf(error_cause, 512, "Invalid element in the publishers array (not a integer)");
+											//goto prepare_response;
+											continue;
+										}
+										JANUS_LOG(LOG_WARN, "HOOLVATEST: publisher to remain active %lld\n", json_integer_value(a));
+										if (l->feed->user_id == (guint64)json_integer_value(a)) {
+											JANUS_LOG(LOG_WARN, "HOOLVATEST1: participant id: recvd [%lld]: actual [%ld] matched\n",json_integer_value(a), l->feed->user_id);
+											gboolean newvideo = TRUE;
+											gboolean oldvideo = l->video;
+											if(!oldvideo && newvideo) {
+												JANUS_LOG(LOG_WARN, "HOOLVATEST: [%s]: unfridged [%s] publisher\n",participant->display, l->feed->display);
+												/* Video just resumed, reset the RTP sequence numbers */
+												l->context.v_seq_reset = TRUE;
+
+											}
+
+											l->video = newvideo;
+											if(l->video) {
+												/* Send a FIR */
+												janus_videoroom_reqpli(participant, "Restoring video for subscriber");
+											}
+											break;
+										}
+									}
+									
+									if (i >= array_size) {			
+										l->video = FALSE;
+										JANUS_LOG(LOG_WARN, "HOOLVATEST: [%s]: fridged [%s] publisher\n",participant->display, l->feed->display);
+									}
+								}
+
+								ps = ps->next;
+							}
+							janus_mutex_unlock(&participant->own_subscriptions_mutex);
+						}
+					}
+				}
+
+			} else if(!strcasecmp(request_text, "pauseall")) {
+				/* server isn't sending all publisher streams to this participant */
+
+				JANUS_VALIDATE_JSON_OBJECT(root, publish_parameters,
+					error_code, error_cause, TRUE,
+					JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT);
+				if(error_code != 0) {
+					janus_refcount_decrease(&participant->ref);
+					goto error;
+				}
+				json_t *video = json_object_get(root, "video");
+
+				if(video) {
+					JANUS_LOG(LOG_WARN, "HOOLVATEST: All Subscriber's fridged\n");
+
+					gboolean newvideo = json_is_true(video);
+
+					if(!newvideo && session->started) {
+						janus_mutex_lock(&participant->own_subscriptions_mutex);
+						GSList *ps = participant->subscriptions;
+
+						while(ps) {
+							janus_videoroom_subscriber *l = (janus_videoroom_subscriber *)ps->data;
+							if(l && l->video_offered) {
+								JANUS_LOG(LOG_WARN, "HOOLVATEST: [%s]: fridged [%s] publisher\n",participant->display, l->feed->display);
+								l->video = newvideo;
+							}
+
+							ps = ps->next;
+						}
+						janus_mutex_unlock(&participant->own_subscriptions_mutex);
+					}
+				}
+
+			} else if(!strcasecmp(request_text, "configureall")) {
+				/* Configure (or publish a new feed) audio/video/bitrate for this publisher */
+				JANUS_VALIDATE_JSON_OBJECT(root, publish_parameters,
+					error_code, error_cause, TRUE,
+					JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT);
+				if(error_code != 0) {
+					janus_refcount_decrease(&participant->ref);
+					goto error;
+				}
+				json_t *bitrate = json_object_get(root, "bitrate");
+				json_t *video = json_object_get(root, "video");
+
+				if(bitrate) {
+					/*TODO: find list of participants in the room
+					get the handle id of publisher
+					send REMB request*/
+					JANUS_LOG(LOG_WARN, "HOOLVATEST: All publisher's bitrate update\n");
+					janus_videoroom_notify_participants_remb(participant, bitrate);
+				}
+
+				if(video) {
+					JANUS_LOG(LOG_WARN, "HOOLVATEST: All Subscriber's unfridged\n");
+
+					gboolean newvideo = json_is_true(video);
+
+					if(newvideo && session->started) {
+						janus_mutex_lock(&participant->own_subscriptions_mutex);
+						GSList *ps = participant->subscriptions;
+
+						while(ps) {
+							janus_videoroom_subscriber *l = (janus_videoroom_subscriber *)ps->data;
+							if(l && l->video_offered) {
+								gboolean oldvideo = l->video;
+
+								if(!oldvideo && newvideo) {
+									JANUS_LOG(LOG_WARN, "HOOLVATEST: [%s]: unfridged [%s] publisher\n",participant->display, l->feed->display);
+									/* Video just resumed, reset the RTP sequence numbers */
+										l->context.v_seq_reset = TRUE;
+
+								}
+
+								l->video = newvideo;
+								if(l->video) {
+									/* Send a FIR */
+									janus_videoroom_reqpli(participant, "Restoring video for subscriber");
+								}
+							}
+
+							ps = ps->next;
+						}
+						janus_mutex_unlock(&participant->own_subscriptions_mutex);
+					}
+				}
 			} else if(!strcasecmp(request_text, "configure") || !strcasecmp(request_text, "publish")) {
 				if(!strcasecmp(request_text, "publish") && participant->sdp) {
 					janus_refcount_decrease(&participant->ref);
@@ -6023,7 +6214,7 @@ static void *janus_videoroom_handler(void *data) {
 				}
 				if(bitrate) {
 					participant->bitrate = json_integer_value(bitrate);
-					JANUS_LOG(LOG_VERB, "Setting video bitrate: %"SCNu32" (room %s, user %s)\n",
+					JANUS_LOG(LOG_WARN, "HOOLVATEST: Setting video bitrate: %"SCNu32" (room %s, user %s)\n",
 						participant->bitrate, participant->room_id_str, participant->user_id_str);
 					/* Send a new REMB */
 					if(session->started)
