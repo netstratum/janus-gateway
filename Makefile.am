@@ -191,7 +191,7 @@ BUILT_SOURCES = cmdline.c cmdline.h version.c
 cmdline.h: cmdline.c
 
 cmdline.c: janus.c
-	gengetopt --set-package="janus" --set-version="$(VERSION)" < janus.ggo
+	gengetopt --set-package="janus" --set-version="$(VERSION)" < $(top_srcdir)/janus.ggo
 
 directory = .git
 dir_target = $(directory)-$(wildcard $(directory))
@@ -208,7 +208,7 @@ version.c: FORCE | $(dir_target)
 	echo "$(build_date)" | awk 'BEGIN {} {print "const char *janus_build_git_time = \""$$0"\";"} END {} ' >> version.c
 	echo "$(JANUS_VERSION)" | awk 'BEGIN {} {print "int janus_version = "$$0";"} END {} ' >> version.c
 	echo "$(JANUS_VERSION_STRING)" | awk 'BEGIN {} {print "const char *janus_version_string = \""$$0"\";"} END {} ' >> version.c
-	pkg-config --modversion nice | awk 'BEGIN {} {print "const char *libnice_version_string = \""$$0"\";"} END {} ' >> version.c
+	PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" pkg-config --modversion nice | awk 'BEGIN {} {print "const char *libnice_version_string = \""$$0"\";"} END {} ' >> version.c
 
 $(dir_present):
 	`which git` rev-parse HEAD | awk 'BEGIN {print "#include \"version.h\""} {print "const char *janus_build_git_sha = \"" $$0"\";"} END {}' > version.c
@@ -366,6 +366,16 @@ events_libjanus_nanomsgevh_la_LDFLAGS = $(events_ldflags) -lnanomsg
 events_libjanus_nanomsgevh_la_LIBADD = $(events_libadd)
 conf_DATA += conf/janus.eventhandler.nanomsgevh.jcfg.sample
 EXTRA_DIST += conf/janus.eventhandler.nanomsgevh.jcfg.sample
+endif
+
+if ENABLE_GELFEVH
+event_LTLIBRARIES += events/libjanus_gelfevh.la
+events_libjanus_gelfevh_la_SOURCES = events/janus_gelfevh.c
+events_libjanus_gelfevh_la_CFLAGS = $(events_cflags)
+events_libjanus_gelfevh_la_LDFLAGS = $(events_ldflags)
+events_libjanus_gelfevh_la_LIBADD = $(events_libadd)
+conf_DATA += conf/janus.eventhandler.gelfevh.jcfg.sample
+EXTRA_DIST += conf/janus.eventhandler.gelfevh.jcfg.sample
 endif
 
 ##
@@ -573,6 +583,10 @@ janus_pp_rec_SOURCES = \
 	postprocessing/pp-g722.h \
 	postprocessing/pp-h264.c \
 	postprocessing/pp-h264.h \
+	postprocessing/pp-av1.c \
+	postprocessing/pp-av1.h \
+	postprocessing/pp-h265.c \
+	postprocessing/pp-h265.h \
 	postprocessing/pp-opus.c \
 	postprocessing/pp-opus.h \
 	postprocessing/pp-opus-silence.h \
@@ -589,6 +603,7 @@ janus_pp_rec_SOURCES = \
 
 janus_pp_rec_CFLAGS = \
 	$(AM_CFLAGS) \
+	-I$(top_builddir)/postprocessing \
 	$(LIBCURL_CFLAGS) \
 	$(POST_PROCESSING_CFLAGS) \
 	$(NULL)
@@ -603,7 +618,7 @@ BUILT_SOURCES += postprocessing/pp-cmdline.c postprocessing/pp-cmdline.h
 postprocessing/pp-cmdline.h: postprocessing/pp-cmdline.c
 
 postprocessing/pp-cmdline.c: postprocessing/janus-pp-rec.c
-	gengetopt --set-package="janus-pp-rec" --set-version="$(VERSION)" -F postprocessing/pp-cmdline < postprocessing/janus-pp-rec.ggo
+	gengetopt --set-package="janus-pp-rec" --set-version="$(VERSION)" -F postprocessing/pp-cmdline < $(top_srcdir)/postprocessing/janus-pp-rec.ggo
 
 EXTRA_DIST += postprocessing/janus-pp-rec.ggo
 CLEANFILES += postprocessing/pp-cmdline.c postprocessing/pp-cmdline.h
@@ -637,6 +652,7 @@ pcap2mjr_SOURCES = \
 
 pcap2mjr_CFLAGS = \
 	$(AM_CFLAGS) \
+	-I$(top_builddir)/postprocessing \
 	$(POST_PROCESSING_CFLAGS) \
 	$(PCAP_CFLAGS) \
 	$(NULL)
@@ -652,7 +668,7 @@ BUILT_SOURCES += postprocessing/p2m-cmdline.c postprocessing/p2m-cmdline.h
 postprocessing/p2m-cmdline.h: postprocessing/p2m-cmdline.c
 
 postprocessing/p2m-cmdline.c: postprocessing/pcap2mjr.c
-	gengetopt --set-package="pcap2mjr" --set-version="$(VERSION)" -F postprocessing/p2m-cmdline < postprocessing/pcap2mjr.ggo
+	gengetopt --set-package="pcap2mjr" --set-version="$(VERSION)" -F postprocessing/p2m-cmdline < $(top_srcdir)/postprocessing/pcap2mjr.ggo
 
 EXTRA_DIST += postprocessing/pcap2mjr.ggo
 CLEANFILES += postprocessing/p2m-cmdline.c postprocessing/p2m-cmdline.h
