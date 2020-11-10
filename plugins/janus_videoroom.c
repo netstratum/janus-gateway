@@ -4940,6 +4940,7 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 				if(notify_talk_event) {
 					janus_mutex_lock(&videoroom->mutex);
 					json_t *event = json_object();
+					int ret = 0;
 					json_object_set_new(event, "videoroom", json_string(participant->talking ? "talking" : "stopped-talking"));
 					json_object_set_new(event, "room", string_ids ? json_string(videoroom->room_id_str) : json_integer(videoroom->room_id));
 					json_object_set_new(event, "id", string_ids ? json_string(participant->user_id_str) : json_integer(participant->user_id));
