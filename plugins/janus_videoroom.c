@@ -2562,6 +2562,7 @@ static void janus_videoroom_notify_participants(janus_videoroom_publisher *parti
 	}
 }
 
+
 static void janus_videoroom_participant_joining(janus_videoroom_publisher *p) {
 	/* we need to check if the room still exists, may have been destroyed already */
 	if(p->room == NULL)
@@ -4913,12 +4914,18 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 				if(notify_talk_event) {
 					janus_mutex_lock(&videoroom->mutex);
 					json_t *event = json_object();
+					int ret = 0;
 					json_object_set_new(event, "videoroom", json_string(participant->talking ? "talking" : "stopped-talking"));
 					json_object_set_new(event, "room", string_ids ? json_string(videoroom->room_id_str) : json_integer(videoroom->room_id));
 					json_object_set_new(event, "id", string_ids ? json_string(participant->user_id_str) : json_integer(participant->user_id));
 					json_object_set_new(event, "audio-level-dBov-avg", json_real(audio_dBov_avg));
-					/* Notify the speaker this event is related to as well */
-					janus_videoroom_notify_participants(participant, event, TRUE);
+                                        /* Notify the speaker this event is related to as well */
+                                        /* HOOLVA CHANGE: send talking evnt to publisher itself
+                                        janus_videoroom_notify_participants(participant, event, TRUE);
+                                        */
+                                        gateway->push_event(participant->session->handle, &janus_videoroom_plugin, NULL, event, NULL);
+                                        JANUS_LOG(LOG_VERB, "  >> %d (%s)\n", ret, janus_get_api_error(ret));
+
 					json_decref(event);
 					janus_mutex_unlock(&videoroom->mutex);
 					/* Also notify event handlers */
