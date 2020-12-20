@@ -4639,6 +4639,13 @@ gint main(int argc, char *argv[])
 		janus_recorder_init(FALSE, NULL);
 	}
 
+	item = janus_config_get(config, config_general, janus_config_type_item, "recordings_dir");
+	if(item && item->value) {
+		janus_recorder_dir_init(TRUE, item->value);
+	} else {
+		janus_recorder_dir_init(FALSE, NULL);
+	}
+
 	/* Check if we should hide dependencies in "info" requests */
 	item = janus_config_get(config, config_general, janus_config_type_item, "hide_dependencies");
 	if(item && item->value && janus_is_true(item->value))
@@ -5485,6 +5492,8 @@ gint main(int argc, char *argv[])
 	}
 
 	janus_recorder_deinit();
+	janus_recorder_dir_deinit();
+
 	g_free(local_ip);
 	if (public_ips) {
 		g_list_free(public_ips);

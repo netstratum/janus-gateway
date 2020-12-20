@@ -73,6 +73,9 @@ void janus_recorder_init(gboolean tempnames, const char *extension);
 /*! \brief De-initialize the recorder code */
 void janus_recorder_deinit(void);
 
+void janus_recorder_dir_init(gboolean dirnames, const char *rec_dir);
+void janus_recorder_dir_deinit(void);
+
 /*! \brief Create a new recorder
  * \note If no target directory is provided, the current directory will be used. If no filename
  * is passed, a random filename will be used.
