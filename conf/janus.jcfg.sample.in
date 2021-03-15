@@ -88,6 +88,7 @@ general: {
 									# external scripts), then uncomment and set the
 									# recordings_tmp_ext property to the extension
 									# to add to the base (e.g., tmp --> .mjr.tmp).
+	#recordings_dir = "/tmp"		# prefix the base directory
 	#event_loops = 8				# By default, Janus handles each have their own
 									# event loop and related thread for all the media
 									# routing and management. If for some reason you'd

@@ -105,11 +105,7 @@ static void janus_recorder_free(const janus_refcount *recorder_ref) {
 
 janus_recorder *janus_recorder_create(const char *dir, const char *codec, const char *filename) {
 	/* Same as janus_recorder_create_full, but with no fmtp */
-	if (dir) {
 		return janus_recorder_create_full(dir, codec, NULL, filename);
-	} else {
-		return janus_recorder_create_full(recording_dir, codec, NULL, filename);
-	}
 }
 janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, const char *fmtp, const char *filename) {
 	janus_recorder_medium type = JANUS_RECORDER_AUDIO;

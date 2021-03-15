@@ -809,6 +809,9 @@ room-<unique room ID>: {
 #endif
 #include <netdb.h>
 #include <sys/time.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include <libgen.h>
 
 #include "../debug.h"
 #include "../apierror.h"
@@ -1017,6 +1020,7 @@ static void janus_audiobridge_hangup_media_internal(janus_plugin_session *handle
 
 /* Extension to add while recording (e.g., "tmp" --> ".wav.tmp") */
 static char *rec_tempext = NULL;
+static char *recordings_dir = NULL;
 
 typedef struct janus_audiobridge_message {
 	janus_plugin_session *handle;
@@ -1999,6 +2003,9 @@ int janus_audiobridge_init(janus_callbacks *callback, const char *config_path) {
 		janus_config_item *ext = janus_config_get(config, config_general, janus_config_type_item, "record_tmp_ext");
 		if(ext != NULL && ext->value != NULL)
 			rec_tempext = g_strdup(ext->value);
+		janus_config_item *rec_config_dir = janus_config_get(config, config_general, janus_config_type_item, "recordings_dir");
+		if(rec_config_dir != NULL && rec_config_dir->value != NULL)
+			recordings_dir = g_strdup(rec_config_dir->value);
 		janus_config_item *events = janus_config_get(config, config_general, janus_config_type_item, "events");
 		if(events != NULL && events->value != NULL)
 			notify_events = janus_is_true(events->value);
@@ -2247,6 +2254,7 @@ void janus_audiobridge_destroy(void) {
 	janus_config_destroy(config);
 	g_free(admin_key);
 	g_free(rec_tempext);
+	g_free(recordings_dir);
 
 	g_atomic_int_set(&initialized, 0);
 	g_atomic_int_set(&stopping, 0);
@@ -2741,6 +2749,10 @@ static json_t *janus_audiobridge_process_synchronous_request(janus_audiobridge_s
 		json_t *secret = json_object_get(root, "new_secret");
 		json_t *pin = json_object_get(root, "new_pin");
 		json_t *is_private = json_object_get(root, "new_is_private");
+		json_t *record = json_object_get(root, "record");
+		gboolean recording_active = json_is_true(record);
+		json_t *recfile = json_object_get(root, "record_file");
+
 		json_t *permanent = json_object_get(root, "permanent");
 		gboolean save = permanent ? json_is_true(permanent) : FALSE;
 		if(save && config == NULL) {
@@ -2792,6 +2804,15 @@ static json_t *janus_audiobridge_process_synchronous_request(janus_audiobridge_s
 			audiobridge->room_secret = new_secret;
 			g_free(old_secret);
 		}
+
+		if (recording_active != audiobridge->record) {
+			audiobridge->record = recording_active;
+			if(recording_active && recfile)
+				audiobridge->record_file = g_strdup(json_string_value(recfile));
+		} else {
+			JANUS_LOG(LOG_ERR, "Already recording started or stopped\n");
+		}
+
 		if(pin && strlen(json_string_value(pin)) > 0) {
 			char *old_pin = audiobridge->room_pin;
 			char *new_pin = g_strdup(json_string_value(pin));
@@ -6240,10 +6261,14 @@ error:
 static void *janus_audiobridge_mixer_thread(void *data) {
 	JANUS_LOG(LOG_VERB, "Audio bridge thread starting...\n");
 	janus_audiobridge_room *audiobridge = (janus_audiobridge_room *)data;
+	gboolean room_prev_recording_active;
+	gint64 creation_time = 0;
+
 	if(!audiobridge) {
 		JANUS_LOG(LOG_ERR, "Invalid room!\n");
 		return NULL;
 	}
+	room_prev_recording_active = audiobridge->record;
 	JANUS_LOG(LOG_VERB, "Thread is for mixing room %s (%s) at rate %"SCNu32"...\n",
 		audiobridge->room_id_str, audiobridge->room_name, audiobridge->sampling_rate);
 
@@ -6481,6 +6506,136 @@ static void *janus_audiobridge_mixer_thread(void *data) {
 			}
 		}
 #endif
+		if(audiobridge->record && !room_prev_recording_active) {
+			char rec_dir[255];
+			char filename[255];
+			struct stat s;
+			int err;
+			char *copy_for_parent = NULL;
+			gboolean isRecDirExists = FALSE;
+			creation_time = janus_get_real_time();
+
+			JANUS_LOG(LOG_ERR, "on demand recording enable");
+
+			if(audiobridge->record_file) {
+				/* Helper copies to avoid overwriting */
+				copy_for_parent = g_strdup(audiobridge->record_file);
+
+				/* Get filename parent folder */
+				const char *filename_parent = dirname(copy_for_parent);
+				/* make whole direcotry with base path */
+
+				memset(rec_dir, 0, sizeof(rec_dir));
+				g_snprintf(rec_dir, 255, "%s/%s/", recordings_dir, filename_parent);
+				g_snprintf(filename, 255, "%s/%s-mixed-audio@%"SCNi64"@.wav%s%s", recordings_dir, audiobridge->record_file, creation_time, rec_tempext ? "." : "", rec_tempext ? rec_tempext : "");
+			} else {
+				g_snprintf(filename, 255, "mixed-audio.wav%s%s", rec_tempext ? "." : "", rec_tempext ? rec_tempext : "");
+			}
+
+			/* Check if this directory exists, and create it if needed */
+			err = stat(rec_dir, &s);
+			if(err == -1) {
+				if(ENOENT == errno) {
+					/* Directory does not exist, try creating it */
+					if(janus_mkdir(rec_dir, 0755) < 0) {
+						JANUS_LOG(LOG_ERR, "mkdir (%s) error: %d (%s)\n", rec_dir, errno, strerror(errno));
+						g_free(audiobridge->record_file);
+						audiobridge->record_file = NULL;
+					} else {
+						isRecDirExists = TRUE;
+					}
+				} else {
+					JANUS_LOG(LOG_ERR, "stat (%s) error: %d (%s)\n", rec_dir, errno, strerror(errno));
+					g_free(audiobridge->record_file);
+					audiobridge->record_file = NULL;
+				}
+			} else {
+				if(S_ISDIR(s.st_mode)) {
+					/* Directory exists */
+					JANUS_LOG(LOG_VERB, "Directory exists: %s\n", rec_dir);
+					isRecDirExists = TRUE;
+				} else {
+					/* File exists but it's not a directory? */
+					JANUS_LOG(LOG_ERR, "Not a directory? %s\n", rec_dir);
+
+					g_free(audiobridge->record_file);
+					audiobridge->record_file = NULL;
+				}
+			}
+
+			if(isRecDirExists) {
+				audiobridge->recording = fopen(filename, "wb");
+				if(audiobridge->recording == NULL) {
+					JANUS_LOG(LOG_WARN, "Recording requested, but could NOT open file %s for writing...\n", filename);
+					g_free(audiobridge->record_file);
+					audiobridge->record_file = NULL;
+				} else {
+					room_prev_recording_active = TRUE;
+					JANUS_LOG(LOG_VERB, "Recording requested, opened file %s for writing\n", filename);
+					/* Write WAV header */
+					wav_header header = {
+						{'R', 'I', 'F', 'F'},
+						0,
+						{'W', 'A', 'V', 'E'},
+						{'f', 'm', 't', ' '},
+						16,
+						1,
+						1,
+						audiobridge->sampling_rate,
+						audiobridge->sampling_rate * 2,
+						2,
+						16,
+						{'d', 'a', 't', 'a'},
+						0
+					};
+					if(fwrite(&header, 1, sizeof(header), audiobridge->recording) != sizeof(header)) {
+						JANUS_LOG(LOG_ERR, "Error writing WAV header...\n");
+					}
+					fflush(audiobridge->recording);
+					audiobridge->record_lastupdate = janus_get_monotonic_time();
+				}
+			}
+			g_free(copy_for_parent);
+			copy_for_parent = NULL;
+		} else if (!audiobridge->record && room_prev_recording_active) {
+			JANUS_LOG(LOG_ERR, "on demand recording disable: creation_time%"SCNi64"\n",creation_time);
+			room_prev_recording_active = FALSE;
+			/* Update the length in the header */
+			fseek(audiobridge->recording, 0, SEEK_END);
+			long int size = ftell(audiobridge->recording);
+			if(size >= 8) {
+				size -= 8;
+				fseek(audiobridge->recording, 4, SEEK_SET);
+				fwrite(&size, sizeof(uint32_t), 1, audiobridge->recording);
+				size += 8;
+				fseek(audiobridge->recording, 40, SEEK_SET);
+				fwrite(&size, sizeof(uint32_t), 1, audiobridge->recording);
+				fflush(audiobridge->recording);
+			}
+			fclose(audiobridge->recording);
+			char filename[255];
+			if(audiobridge->record_file) {
+				g_snprintf(filename, 255, "%s/%s-mixed-audio@%"SCNi64"@.wav", recordings_dir, audiobridge->record_file, creation_time);
+			} else {
+				g_snprintf(filename, 255, "mixed-audio.wav");
+			}
+			if(rec_tempext) {
+				/* We need to rename the file, to remove the temporary extension */
+				char extfilename[255];
+				if(audiobridge->record_file) {
+					g_snprintf(extfilename, 255, "%s/%s-mixed-audio@%"SCNi64"@.wav.%s", recordings_dir, audiobridge->record_file, creation_time, rec_tempext);
+				} else {
+					g_snprintf(extfilename, 255, "mixed-audio.wav.%s", rec_tempext);
+				}
+				if(rename(extfilename, filename) != 0) {
+					JANUS_LOG(LOG_ERR, "Error renaming %s to %s...\n", extfilename, filename);
+				} else {
+					JANUS_LOG(LOG_INFO, "Recording renamed: %s\n", filename);
+				}
+			}
+			g_free(audiobridge->record_file);
+		}
+
 		/* Are we recording the mix? (only do it if there's someone in, though...) */
 		if(audiobridge->recording != NULL && g_list_length(participants_list) > 0) {
 			for(i=0; i<samples; i++) {
