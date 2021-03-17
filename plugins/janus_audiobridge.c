@@ -6541,6 +6541,7 @@ static void *janus_audiobridge_mixer_thread(void *data) {
 						JANUS_LOG(LOG_ERR, "mkdir (%s) error: %d (%s)\n", rec_dir, errno, strerror(errno));
 						g_free(audiobridge->record_file);
 						audiobridge->record_file = NULL;
+						audiobridge->record = FALSE;
 					} else {
 						isRecDirExists = TRUE;
 					}
@@ -6548,6 +6549,7 @@ static void *janus_audiobridge_mixer_thread(void *data) {
 					JANUS_LOG(LOG_ERR, "stat (%s) error: %d (%s)\n", rec_dir, errno, strerror(errno));
 					g_free(audiobridge->record_file);
 					audiobridge->record_file = NULL;
+					audiobridge->record = FALSE;
 				}
 			} else {
 				if(S_ISDIR(s.st_mode)) {
@@ -6557,9 +6559,9 @@ static void *janus_audiobridge_mixer_thread(void *data) {
 				} else {
 					/* File exists but it's not a directory? */
 					JANUS_LOG(LOG_ERR, "Not a directory? %s\n", rec_dir);
-
 					g_free(audiobridge->record_file);
 					audiobridge->record_file = NULL;
+					audiobridge->record = FALSE;
 				}
 			}
 
@@ -6569,6 +6571,7 @@ static void *janus_audiobridge_mixer_thread(void *data) {
 					JANUS_LOG(LOG_WARN, "Recording requested, but could NOT open file %s for writing...\n", filename);
 					g_free(audiobridge->record_file);
 					audiobridge->record_file = NULL;
+					audiobridge->record = FALSE;
 				} else {
 					room_prev_recording_active = TRUE;
 					JANUS_LOG(LOG_VERB, "Recording requested, opened file %s for writing\n", filename);
@@ -6613,6 +6616,7 @@ static void *janus_audiobridge_mixer_thread(void *data) {
 				fflush(audiobridge->recording);
 			}
 			fclose(audiobridge->recording);
+			audiobridge->recording = NULL;
 			char filename[255];
 			if(audiobridge->record_file) {
 				g_snprintf(filename, 255, "%s/%s-mixed-audio@%"SCNi64"@.wav", recordings_dir, audiobridge->record_file, creation_time);
@@ -6634,6 +6638,7 @@ static void *janus_audiobridge_mixer_thread(void *data) {
 				}
 			}
 			g_free(audiobridge->record_file);
+			audiobridge->record_file = NULL;
 		}
 
 		/* Are we recording the mix? (only do it if there's someone in, though...) */
