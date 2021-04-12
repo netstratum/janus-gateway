@@ -1130,7 +1130,7 @@ static int janus_websockets_common_callback(
 				ws_client->incoming = g_malloc(len+1);
 				memcpy(ws_client->incoming, in, len);
 				ws_client->incoming[len] = '\0';
-				JANUS_LOG(LOG_HUGE, "%s\n", ws_client->incoming);
+				JANUS_LOG(LOG_INFO, "WebSocket message received: %s\n", ws_client->incoming);
 			} else {
 				size_t offset = strlen(ws_client->incoming);
 				JANUS_LOG(LOG_HUGE, "[%s-%p] Appending fragment: offset %zu, %zu bytes, %zu remaining\n", log_prefix, wsi, offset, len, remaining);
@@ -1233,6 +1233,7 @@ static int janus_websockets_common_callback(
 					JANUS_LOG(LOG_HUGE, "[%s-%p] Sending WebSocket message (%zu bytes)...\n", log_prefix, wsi, strlen(response));
 					int sent = lws_write(wsi, ws_client->buffer + LWS_PRE, strlen(response), LWS_WRITE_TEXT);
 					JANUS_LOG(LOG_HUGE, "[%s-%p]   -- Sent %d/%zu bytes\n", log_prefix, wsi, sent, strlen(response));
+					JANUS_LOG(LOG_INFO, "Sending WebSocket message: %s\n", response);
 					if(sent > -1 && sent < (int)strlen(response)) {
 						/* We couldn't send everything in a single write, we'll complete this in the next round */
 						ws_client->bufpending = strlen(response) - sent;
