@@ -229,6 +229,8 @@ static GMainLoop *mainloop = NULL;
 
 /* Public instance name */
 static gchar *server_name = NULL;
+#define DEFAULT_SERVER_INSTANCE	1
+static uint server_instance = DEFAULT_SERVER_INSTANCE;
 
 static json_t *janus_create_message(const char *status, uint64_t session_id, const char *transaction) {
 	json_t *msg = json_object();
@@ -308,6 +310,8 @@ static json_t *janus_info(const char *transaction) {
 	json_object_set_new(info, "reclaim-session-timeout", json_integer(reclaim_session_timeout));
 	json_object_set_new(info, "candidates-timeout", json_integer(candidates_timeout));
 	json_object_set_new(info, "server-name", json_string(server_name ? server_name : JANUS_SERVER_NAME));
+	json_object_set_new(info, "server-instance", json_integer(server_instance));
+
 	json_object_set_new(info, "local-ip", json_string(local_ip));
 	guint public_ip_count = janus_get_public_ip_count();
 	if(public_ip_count > 0) {
@@ -4181,6 +4185,18 @@ gint main(int argc, char *argv[])
 	janus_config_item *item = janus_config_get(config, config_general, janus_config_type_item, "server_name");
 	if(item && item->value) {
 		server_name = g_strdup(item->value);
+	}
+
+	/* Check if a custom server instance value was specified */
+	item = janus_config_get(config, config_general, janus_config_type_item, "server_instance");
+	if(item && item->value) {
+		int instance = atoi(item->value);
+		if(instance <= 0) {
+			JANUS_LOG(LOG_WARN, "server_instance value is less or equal to zero. set default value 1\n");
+		} else {
+			server_instance = instance;
+		}
+		janus_init_server_instance(server_instance);
 	}
 
 	/* Initialize logger */

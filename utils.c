@@ -30,6 +30,11 @@
 #include "mach_gettime.h"
 #endif
 
+#define DEFAULT_SERVER_INSTANCE	1
+#define TEN_TO_THE_POW_OF_THIRTEEN 10000000000000
+
+static uint instance = DEFAULT_SERVER_INSTANCE;
+
 gint64 janus_get_monotonic_time(void) {
 	struct timespec ts;
 	clock_gettime (CLOCK_MONOTONIC, &ts);
@@ -74,6 +79,10 @@ guint32 janus_random_uint32(void) {
 	return g_random_int();
 }
 
+void janus_init_server_instance(uint server_instance) {
+	instance = server_instance;
+}
+
 guint64 janus_random_uint64(void) {
 	/*
 	 * FIXME This needs to be improved, and use something that generates
@@ -85,8 +94,13 @@ guint64 janus_random_uint64(void) {
 	 * PS: JavaScript only supports integer up to 2^53, so we need to
 	 * make sure the number is below 9007199254740992 for safety
 	 */
+	/*
 	guint64 num = g_random_int() & 0x1FFFFF;
 	num = (num << 32) | g_random_int();
+	*/
+	guint64 num = g_random_int() & 0x8FF;
+	num = (instance * TEN_TO_THE_POW_OF_THIRTEEN) | (num << 32) | g_random_int();
+
 	return num;
 }
 
