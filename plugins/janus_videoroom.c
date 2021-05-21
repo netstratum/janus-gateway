@@ -6176,6 +6176,13 @@ static void *janus_videoroom_handler(void *data) {
 					json_object_set_new(event, "videoroom", json_string("attached"));
 					json_object_set_new(event, "room", string_ids ? json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
 					json_object_set_new(event, "id", string_ids ? json_string(feed_id_str) : json_integer(feed_id));
+					if(sc_substream) {
+						if(publisher->ssrc[0] != 0 || publisher->rid[0] != NULL){
+							json_object_set_new(event, "substream", json_integer(subscriber->sim_context.substream));
+						} else {
+							json_object_set_new(event, "substream", json_integer(-1));
+						}
+					}
 					if(publisher->display)
 						json_object_set_new(event, "display", json_string(publisher->display));
 					if(legacy)
