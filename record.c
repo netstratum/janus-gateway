@@ -43,6 +43,10 @@ static gboolean rec_tempname = FALSE;
 /* Extension to add in case tempnames is true (default="tmp" --> ".tmp") */
 static char *rec_tempext = NULL;
 
+static gboolean rec_dirname = FALSE;
+
+static char *recording_dir = NULL;
+
 void janus_recorder_init(gboolean tempnames, const char *extension) {
 	JANUS_LOG(LOG_INFO, "Initializing recorder code\n");
 	if(tempnames) {
@@ -60,6 +64,25 @@ void janus_recorder_init(gboolean tempnames, const char *extension) {
 void janus_recorder_deinit(void) {
 	rec_tempname = FALSE;
 	g_free(rec_tempext);
+}
+
+void janus_recorder_dir_init(gboolean dirnames, const char *rec_dir) {
+	JANUS_LOG(LOG_INFO, "Initializing recorder code\n");
+	if(dirnames) {
+		rec_dirname = TRUE;
+		if(rec_dir == NULL) {
+			recording_dir = g_strdup("/tmp/");
+			JANUS_LOG(LOG_INFO, "  -- No recoding directory provided, using default one (/tmp/)\n");
+		} else {
+			recording_dir = g_strdup(rec_dir);
+			JANUS_LOG(LOG_INFO, "  -- Using temporary extension .%s\n", recording_dir);
+		}
+	}
+}
+
+void janus_recorder_dir_deinit(void) {
+	rec_dirname = FALSE;
+	g_free(recording_dir);
 }
 
 static void janus_recorder_free(const janus_refcount *recorder_ref) {
@@ -118,6 +141,8 @@ janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, c
 	const char *rec_file = NULL;
 	char *copy_for_parent = NULL;
 	char *copy_for_base = NULL;
+	char *rec_dir_with_base = NULL;
+
 	/* Check dir and filename values */
 	if(filename != NULL) {
 		/* Helper copies to avoid overwriting */
@@ -127,9 +152,18 @@ janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, c
 		const char *filename_parent = dirname(copy_for_parent);
 		/* Get filename base file */
 		const char *filename_base = basename(copy_for_base);
+		/* make whole direcotry with base path */
+		if (recording_dir) {
+			rec_dir_with_base=g_strdup_printf("%s/%s", recording_dir, filename_parent);
+		}
+
 		if(!dir) {
 			/* If dir is NULL we have to create filename_parent and filename_base */
-			rec_dir = filename_parent;
+			if (rec_dir_with_base) {
+				rec_dir = rec_dir_with_base;
+			} else {
+				rec_dir = filename_parent;
+			}
 			rec_file = filename_base;
 		} else {
 			/* If dir is valid we have to create dir and filename*/
@@ -152,6 +186,7 @@ janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, c
 					janus_recorder_destroy(rc);
 					g_free(copy_for_parent);
 					g_free(copy_for_base);
+					g_free(rec_dir_with_base);
 					return NULL;
 				}
 			} else {
@@ -159,6 +194,7 @@ janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, c
 				janus_recorder_destroy(rc);
 				g_free(copy_for_parent);
 				g_free(copy_for_base);
+				g_free(rec_dir_with_base);
 				return NULL;
 			}
 		} else {
@@ -171,6 +207,7 @@ janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, c
 				janus_recorder_destroy(rc);
 				g_free(copy_for_parent);
 				g_free(copy_for_base);
+				g_free(rec_dir_with_base);
 				return NULL;
 			}
 		}
@@ -204,6 +241,7 @@ janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, c
 			janus_recorder_destroy(rc);
 			g_free(copy_for_parent);
 			g_free(copy_for_base);
+			g_free(rec_dir_with_base);
 			return NULL;
 		}
 		rc->file = fopen(newname, "wb");
@@ -217,6 +255,7 @@ janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, c
 			janus_recorder_destroy(rc);
 			g_free(copy_for_parent);
 			g_free(copy_for_base);
+			g_free(rec_dir_with_base);
 			return NULL;
 		}
 		rc->file = fopen(path, "wb");
@@ -226,6 +265,7 @@ janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, c
 		janus_recorder_destroy(rc);
 		g_free(copy_for_parent);
 		g_free(copy_for_base);
+		g_free(rec_dir_with_base);
 		return NULL;
 	}
 	if(rec_dir)
@@ -240,6 +280,7 @@ janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, c
 		janus_recorder_destroy(rc);
 		g_free(copy_for_parent);
 		g_free(copy_for_base);
+		g_free(rec_dir_with_base);
 		return NULL;
 	}
 	g_atomic_int_set(&rc->writable, 1);
@@ -250,6 +291,7 @@ janus_recorder *janus_recorder_create_full(const char *dir, const char *codec, c
 	g_atomic_int_set(&rc->destroyed, 0);
 	g_free(copy_for_parent);
 	g_free(copy_for_base);
+	g_free(rec_dir_with_base);
 	return rc;
 }
 
