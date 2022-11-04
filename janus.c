@@ -1348,7 +1348,7 @@ int janus_process_incoming_request(janus_request *request) {
 			goto jsondone;
 		}
 		json_t *body = json_object_get(root, "body");
-		/* Hoolva Change: multiple handles process in a single request*/
+		/* multiple handles process in a single request*/
 		if(json_is_object(body)) {
 
 			json_t *handles_list = json_object_get(body, "handles_list");
