@@ -83,6 +83,11 @@ gboolean janus_strcmp_const_time(const void *str1, const void *str2);
  * @returns A (mostly crypto-safe) random 32-bit unsigned integer */
 guint32 janus_random_uint32(void);
 
+/*! \brief server instace number to create unique ids accross the janus instance
+ * @param server_instance server instance number
+**/
+void janus_init_server_instance(uint server_instance);
+
 /*! \brief Helper to generate random 64-bit unsigned integers
  * @note Unlike janus_random_uint64(), which actually only generates 52 bits, this
  * generates the full 64 bits. See the janus_random_uint64() docstring for details.

@@ -56,6 +56,8 @@ general: {
 	#interface = "1.2.3.4"			# Interface to use (will be used in SDP)
 	#server_name = "MyJanusInstance"# Public name of this Janus instance
 									# as it will appear in an info request
+	#server_instance = 1			# server instace number when multiple janus instaces involved
+									# it will useful to create unique ids accross the janus instance
 	#session_timeout = 60			# How long (in seconds) we should wait before
 									# deciding a Janus session has timed out. A
 									# session times out when no request is received
@@ -88,6 +90,7 @@ general: {
 									# external scripts), then uncomment and set the
 									# recordings_tmp_ext property to the extension
 									# to add to the base (e.g., tmp --> .mjr.tmp).
+	#recordings_dir = "/tmp"		# prefix the base directory
 	#event_loops = 8				# By default, Janus handles each have their own
 									# event loop and related thread for all the media
 									# routing and management. If for some reason you'd

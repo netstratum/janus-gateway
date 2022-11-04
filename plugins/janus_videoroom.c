@@ -5552,12 +5552,18 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 				if(notify_talk_event) {
 					janus_mutex_lock(&videoroom->mutex);
 					json_t *event = json_object();
+					int ret = 0;
 					json_object_set_new(event, "videoroom", json_string(participant->talking ? "talking" : "stopped-talking"));
 					json_object_set_new(event, "room", string_ids ? json_string(videoroom->room_id_str) : json_integer(videoroom->room_id));
 					json_object_set_new(event, "id", string_ids ? json_string(participant->user_id_str) : json_integer(participant->user_id));
 					json_object_set_new(event, "audio-level-dBov-avg", json_real(audio_dBov_avg));
 					/* Notify the speaker this event is related to as well */
+					/* HOOLVA CHANGE: send talking evnt to publisher itself
 					janus_videoroom_notify_participants(participant, event, TRUE);
+					*/
+					gateway->push_event(participant->session->handle, &janus_videoroom_plugin, NULL, event, NULL);
+					JANUS_LOG(LOG_VERB, "  >> %d (%s)\n", ret, janus_get_api_error(ret));
+
 					json_decref(event);
 					janus_mutex_unlock(&videoroom->mutex);
 					/* Also notify event handlers */
@@ -6941,6 +6947,13 @@ static void *janus_videoroom_handler(void *data) {
 					json_object_set_new(event, "videoroom", json_string("attached"));
 					json_object_set_new(event, "room", string_ids ? json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
 					json_object_set_new(event, "id", string_ids ? json_string(feed_id_str) : json_integer(feed_id));
+					if(sc_substream) {
+						if(publisher->ssrc[0] != 0 || publisher->rid[0] != NULL){
+							json_object_set_new(event, "substream", json_integer(subscriber->sim_context.substream));
+						} else {
+							json_object_set_new(event, "substream", json_integer(-1));
+						}
+					}
 					if(publisher->display)
 						json_object_set_new(event, "display", json_string(publisher->display));
 					if(legacy)
@@ -7868,8 +7881,11 @@ static void *janus_videoroom_handler(void *data) {
 		gboolean e2ee = json_is_true(json_object_get(msg->jsep, "e2ee"));
 		if(!msg_sdp) {
 			/* No SDP to send */
-			int ret = gateway->push_event(msg->handle, &janus_videoroom_plugin, msg->transaction, event, NULL);
-			JANUS_LOG(LOG_VERB, "  >> %d (%s)\n", ret, janus_get_api_error(ret));
+			json_t *handles_list = json_object_get(root, "handles_list");
+			if(!handles_list) {
+				int ret = gateway->push_event(msg->handle, &janus_videoroom_plugin, msg->transaction, event, NULL);
+				JANUS_LOG(LOG_VERB, "  >> %d (%s)\n", ret, janus_get_api_error(ret));
+			}
 			json_decref(event);
 		} else {
 			/* Generate offer or answer */

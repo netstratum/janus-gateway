@@ -259,6 +259,9 @@ static GMainLoop *mainloop = NULL;
 /* Public instance name */
 static gchar *server_name = NULL;
 
+#define DEFAULT_SERVER_INSTANCE	1
+static uint server_instance = DEFAULT_SERVER_INSTANCE;
+
 static json_t *janus_create_message(const char *status, uint64_t session_id, const char *transaction) {
 	json_t *msg = json_object();
 	json_object_set_new(msg, "janus", json_string(status));
@@ -340,6 +343,7 @@ static json_t *janus_info(const char *transaction) {
 	json_object_set_new(info, "reclaim-session-timeout", json_integer(reclaim_session_timeout));
 	json_object_set_new(info, "candidates-timeout", json_integer(candidates_timeout));
 	json_object_set_new(info, "server-name", json_string(server_name ? server_name : JANUS_SERVER_NAME));
+	json_object_set_new(info, "server-instance", json_integer(server_instance));
 	json_object_set_new(info, "local-ip", json_string(local_ip));
 	guint public_ip_count = janus_get_public_ip_count();
 	if(public_ip_count > 0) {
@@ -1344,6 +1348,108 @@ int janus_process_incoming_request(janus_request *request) {
 			goto jsondone;
 		}
 		json_t *body = json_object_get(root, "body");
+		/* Hoolva Change: multiple handles process in a single request*/
+		if(json_is_object(body)) {
+
+			json_t *handles_list = json_object_get(body, "handles_list");
+
+			if(handles_list) {
+				JANUS_LOG(LOG_ERR, "Subscriber handles\n");
+				size_t i = 0;
+				size_t array_size = json_array_size(handles_list);
+				guint64 new_handle_id = 0;
+
+				janus_ice_handle *newhandle = NULL;
+
+				for(i=0; i<array_size; i++) {
+					json_t *n_h = json_array_get(handles_list, i);
+					if(!n_h || !json_is_integer(n_h)) {
+						JANUS_LOG(LOG_ERR, "Invalid element in the handles_list array (not a integer)\n");
+						//error_code = JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT;
+						//g_snprintf(error_cause, 512, "Invalid element in the handles_list array (not a integer)");
+						//goto prepare_response;
+						continue;
+					}
+					new_handle_id = json_integer_value(n_h);
+					JANUS_LOG(LOG_ERR, "handle id %"SCNu64"\n", new_handle_id);
+
+					if(new_handle_id < 1) {
+						JANUS_LOG(LOG_ERR, "Invalid handle\n");
+						ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_SESSION_NOT_FOUND, NULL);
+						goto newjsondone;
+					}
+					newhandle = NULL;
+					if(new_handle_id > 0) {
+						newhandle = janus_session_handles_find(session, new_handle_id);
+						if(!newhandle) {
+							JANUS_LOG(LOG_ERR, "Couldn't find any handle %"SCNu64" in session %"SCNu64"...\n", new_handle_id, session_id);
+							ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_HANDLE_NOT_FOUND, "No such handle %"SCNu64" in session %"SCNu64"", new_handle_id, session_id);
+							goto newjsondone;
+						}
+					}
+
+					if(newhandle == NULL) {
+						/* Query is an newhandle-level command */
+						ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_INVALID_REQUEST_PATH, "Unhandled request '%s' at this path", message_text);
+						goto newjsondone;
+					}
+
+					if(newhandle->app == NULL || newhandle->app_handle == NULL) {
+						ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_PLUGIN_MESSAGE, "No plugin to handle this message");
+						goto newjsondone;
+					}
+					janus_plugin *plugin_t = (janus_plugin *)newhandle->app;
+					JANUS_LOG(LOG_VERB, "[%"SCNu64"] There's a message for %s\n", newhandle->handle_id, plugin_t->get_name());
+					JANUS_VALIDATE_JSON_OBJECT(root, body_parameters,
+						error_code, error_cause, FALSE,
+						JANUS_ERROR_MISSING_MANDATORY_ELEMENT, JANUS_ERROR_INVALID_ELEMENT_TYPE);
+					if(error_code != 0) {
+						ret = janus_process_error_string(request, session_id, transaction_text, error_code, error_cause);
+						goto newjsondone;
+					}
+
+					/* Make sure the app handle is still valid */
+					if(newhandle->app == NULL || !janus_plugin_session_is_alive(newhandle->app_handle)) {
+						ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_PLUGIN_MESSAGE, "No plugin to handle this message");
+						janus_flags_clear(&newhandle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_PROCESSING_OFFER);
+						goto newjsondone;
+					}
+
+					/* Send the message to the plugin (which must eventually free transaction_text and unref the two objects, body and jsep) */
+					json_incref(body);
+
+					janus_plugin_result *result = plugin_t->handle_message(newhandle->app_handle,
+					g_strdup((char *)transaction_text), body, NULL);
+
+					if(result == NULL) {
+						/* Something went horribly wrong! */
+						ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_PLUGIN_MESSAGE, "Plugin didn't give a result");
+						goto newjsondone;
+					}
+
+					janus_plugin_result_destroy(result);
+
+				newjsondone:
+					if(newhandle != NULL)
+						janus_refcount_decrease(&newhandle->ref);
+
+				}
+				/*json_t *reply = janus_create_message("ack", session_id, transaction_text);*/
+				json_t *reply = janus_create_message("success", session->session_id, transaction_text);
+				json_object_set_new(reply, "sender", json_integer(handle->handle_id));
+				if(janus_is_opaqueid_in_api_enabled() && handle->opaque_id != NULL)
+					json_object_set_new(reply, "opaque_id", json_string(handle->opaque_id));
+				//json_t *plugin_data = json_object();
+				//json_object_set_new(plugin_data, "plugin", json_string(plugin_t->get_package()));
+				/*json_object_set_new(plugin_data, "data", result->content);
+				json_object_set_new(reply, "plugindata", plugin_data);*/
+				/* Send the success reply */
+				ret = janus_process_success(request, reply);
+				goto jsondone;
+
+			}
+        }
+
 		/* Is there an SDP attached? */
 		json_t *jsep = json_object_get(root, "jsep");
 		char *jsep_type = NULL;
@@ -4375,6 +4481,18 @@ gint main(int argc, char *argv[])
 		server_name = g_strdup(item->value);
 	}
 
+		/* Check if a custom server instance value was specified */
+	item = janus_config_get(config, config_general, janus_config_type_item, "server_instance");
+	if(item && item->value) {
+		int instance = atoi(item->value);
+		if(instance <= 0) {
+			JANUS_LOG(LOG_WARN, "server_instance value is less or equal to zero. set default value 1\n");
+		} else {
+			server_instance = instance;
+		}
+		janus_init_server_instance(server_instance);
+	}
+
 	/* Check if we should exit immediately on dlopen or dlsym errors */
 	item = janus_config_get(config, config_general, janus_config_type_item, "exit_on_dl_error");
 	if(item && item->value && janus_is_true(item->value))
@@ -4841,6 +4959,13 @@ gint main(int argc, char *argv[])
 		janus_recorder_init(TRUE, item->value);
 	} else {
 		janus_recorder_init(FALSE, NULL);
+	}
+
+	item = janus_config_get(config, config_general, janus_config_type_item, "recordings_dir");
+	if(item && item->value) {
+		janus_recorder_dir_init(TRUE, item->value);
+	} else {
+		janus_recorder_dir_init(FALSE, NULL);
 	}
 
 	/* Check if we should hide dependencies in "info" requests */
@@ -5771,6 +5896,8 @@ gint main(int argc, char *argv[])
 	}
 
 	janus_recorder_deinit();
+	janus_recorder_dir_deinit();
+
 	g_free(local_ip);
 	if (public_ips) {
 		g_list_free(public_ips);

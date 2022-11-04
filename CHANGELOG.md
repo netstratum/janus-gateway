@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.13.0-netstratum] - 2022-10-04
+
+- multiple handles process in a single request
+- print websockets request and response logs 
+- server instace number to create unique ids accross the janus instance
+- janus will send active speaker event to participant itself
+- add prefix the base directory for videoroom recording
 
 ## [v0.13.0] - 2022-10-03
 
