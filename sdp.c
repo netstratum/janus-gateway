@@ -1398,7 +1398,7 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 	a = janus_sdp_attribute_create("extmap-allow-mixed", NULL);
 	anon->attributes = g_list_insert_before(anon->attributes, first, a);
 	/* msid-semantic: add new global attribute */
-	a = janus_sdp_attribute_create("msid-semantic", " WMS janus");
+	a = janus_sdp_attribute_create("msid-semantic", " WMS hoolva");
 	anon->attributes = g_list_insert_before(anon->attributes, first, a);
 	/* ICE Full or Lite? */
 	if(janus_ice_is_ice_lite_enabled()) {
