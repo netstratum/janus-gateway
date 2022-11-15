@@ -1598,37 +1598,37 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 			m->attributes = g_list_append(m->attributes, a);
 		}
 		if(m->type == JANUS_SDP_AUDIO) {
-			a = janus_sdp_attribute_create("msid", "janus janusa0");
+			a = janus_sdp_attribute_create("msid", "hoolva hoolvaa0");
 			m->attributes = g_list_append(m->attributes, a);
-			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janus", stream->audio_ssrc);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:hoolva", stream->audio_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
-			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" msid:janus janusa0", stream->audio_ssrc);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" msid:hoolva hoolvaa0", stream->audio_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
-			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" mslabel:janus", stream->audio_ssrc);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" mslabel:hoolva", stream->audio_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
-			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" label:janusa0", stream->audio_ssrc);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" label:hoolvaa0", stream->audio_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
 		} else if(m->type == JANUS_SDP_VIDEO) {
-			a = janus_sdp_attribute_create("msid", "janus janusv0");
+			a = janus_sdp_attribute_create("msid", "hoolva hoolvav0");
 			m->attributes = g_list_append(m->attributes, a);
-			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janus", stream->video_ssrc);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:hoolva", stream->video_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
-			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" msid:janus janusv0", stream->video_ssrc);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" msid:hoolva hoolvav0", stream->video_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
-			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" mslabel:janus", stream->video_ssrc);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" mslabel:hoolva", stream->video_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
-			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" label:janusv0", stream->video_ssrc);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" label:hoolvav0", stream->video_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
 			if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX) &&
 					(m->direction == JANUS_SDP_DEFAULT || m->direction == JANUS_SDP_SENDRECV || m->direction == JANUS_SDP_SENDONLY)) {
 				/* Add rtx SSRC group to negotiate the RFC4588 stuff */
-				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janus", stream->video_ssrc_rtx);
+				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:hoolva", stream->video_ssrc_rtx);
 				m->attributes = g_list_append(m->attributes, a);
-				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" msid:janus janusv0", stream->video_ssrc_rtx);
+				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" msid:hoolva hoolvav0", stream->video_ssrc_rtx);
 				m->attributes = g_list_append(m->attributes, a);
-				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" mslabel:janus", stream->video_ssrc_rtx);
+				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" mslabel:hoolva", stream->video_ssrc_rtx);
 				m->attributes = g_list_append(m->attributes, a);
-				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" label:janusv0", stream->video_ssrc_rtx);
+				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" label:hoolvav0", stream->video_ssrc_rtx);
 				m->attributes = g_list_append(m->attributes, a);
 			}
 		}

@@ -4344,7 +4344,7 @@ static gboolean janus_ice_outgoing_rtcp_handle(gpointer user_data) {
 		sr->si.s_packets = htonl(stream->component->out_stats.audio.packets);
 		sr->si.s_octets = htonl(stream->component->out_stats.audio.bytes);
 		rtcp_sdes *sdes = (rtcp_sdes *)&rtcpbuf[srlen];
-		janus_rtcp_sdes_cname((char *)sdes, sdeslen, "janus", 5);
+		janus_rtcp_sdes_cname((char *)sdes, sdeslen, "hoolva", 6);
 		sdes->chunk.ssrc = htonl(stream->audio_ssrc);
 		/* Enqueue it, we'll send it later */
 		janus_plugin_rtcp rtcp = { .video = FALSE, .buffer = rtcpbuf, .length = srlen+sdeslen };
@@ -4405,7 +4405,7 @@ static gboolean janus_ice_outgoing_rtcp_handle(gpointer user_data) {
 		sr->si.s_packets = htonl(stream->component->out_stats.video[0].packets);
 		sr->si.s_octets = htonl(stream->component->out_stats.video[0].bytes);
 		rtcp_sdes *sdes = (rtcp_sdes *)&rtcpbuf[srlen];
-		janus_rtcp_sdes_cname((char *)sdes, sdeslen, "janus", 5);
+		janus_rtcp_sdes_cname((char *)sdes, sdeslen, "hoolva", 6);
 		sdes->chunk.ssrc = htonl(stream->video_ssrc);
 		/* Enqueue it, we'll send it later */
 		janus_plugin_rtcp rtcp = { .video = TRUE, .buffer = rtcpbuf, .length = srlen+sdeslen };
