@@ -49,6 +49,7 @@ general: {
 	#record_tmp_ext = "tmp"			# Optional temporary extension to add to filenames
 									# while recording: e.g., setting "tmp" would mean
 									# .wav --> .wav.tmp until the file is closed
+	#recordings_dir = "/tmp"		# prefix the base directory
 	#events = false					# Whether events should be sent to event
 									# handlers (default=true)
 
