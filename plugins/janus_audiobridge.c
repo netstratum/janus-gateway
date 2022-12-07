@@ -3241,7 +3241,7 @@ static json_t *janus_audiobridge_process_synchronous_request(janus_audiobridge_s
 		if(recfile)
 			audiobridge->record_file = g_strdup(json_string_value(recfile));
 		if(recdir) {
-			char *record_dir_with_base = g_strdup_printf("%s/%s", recording_dir, json_string_value(recdir));
+			char *record_dir_with_base = g_strdup_printf("%s/%s", recordings_dir, json_string_value(recdir));
 			audiobridge->record_file = g_strdup(json_string_value(recdir));
 
 			if(janus_mkdir(record_dir_with_base, 0755) < 0) {
