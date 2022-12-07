@@ -2586,11 +2586,13 @@ int janus_audiobridge_init(janus_callbacks *callback, const char *config_path) {
 			if(recfile && recfile->value)
 				audiobridge->record_file = g_strdup(recfile->value);
 			if(recdir && recdir->value) {
+				char *record_dir_with_base = g_strdup_printf("%s/%s", recordings_dir, recdir->value);
 				audiobridge->record_dir = g_strdup(recdir->value);
-				if(janus_mkdir(audiobridge->record_dir, 0755) < 0) {
+				if(janus_mkdir(record_dir_with_base, 0755) < 0) {
 					/* FIXME Should this be fatal, when creating a room? */
-					JANUS_LOG(LOG_WARN, "AudioBridge mkdir (%s) error: %d (%s)\n", audiobridge->record_dir, errno, g_strerror(errno));
+					JANUS_LOG(LOG_WARN, "AudioBridge mkdir (%s) error: %d (%s)\n", record_dir_with_base, errno, g_strerror(errno));
 				}
+				g_free(record_dir_with_base);
 			}
 			audiobridge->recording = NULL;
 			if(mjrs && mjrs->value && janus_is_true(mjrs->value))
@@ -3239,11 +3241,14 @@ static json_t *janus_audiobridge_process_synchronous_request(janus_audiobridge_s
 		if(recfile)
 			audiobridge->record_file = g_strdup(json_string_value(recfile));
 		if(recdir) {
-			audiobridge->record_dir = g_strdup(json_string_value(recdir));
-			if(janus_mkdir(audiobridge->record_dir, 0755) < 0) {
+			char *record_dir_with_base = g_strdup_printf("%s/%s", recording_dir, json_string_value(recdir));
+			audiobridge->record_file = g_strdup(json_string_value(recdir));
+
+			if(janus_mkdir(record_dir_with_base, 0755) < 0) {
 				/* FIXME Should this be fatal, when creating a room? */
-				JANUS_LOG(LOG_WARN, "AudioBridge mkdir (%s) error: %d (%s)\n", audiobridge->record_dir, errno, g_strerror(errno));
+				JANUS_LOG(LOG_WARN, "AudioBridge mkdir (%s) error: %d (%s)\n", record_dir_with_base, errno, g_strerror(errno));
 			}
+			g_free(record_dir_with_base);
 		}
 		audiobridge->recording = NULL;
 		if(mjrs && json_is_true(mjrs))
@@ -3746,14 +3751,17 @@ static json_t *janus_audiobridge_process_synchronous_request(janus_audiobridge_s
 		gint room_prev_recording_active = recording_active ? 1 : 0;
 		/* Check if we need to create a folder */
 		if(recording_active && recdir != NULL) {
-			if(janus_mkdir(json_string_value(recdir), 0755) < 0) {
+			char *record_dir_with_base = g_strdup_printf("%s/%s", recordings_dir, json_string_value(recdir));
+			if(janus_mkdir(record_dir_with_base, 0755) < 0) {
 				/* FIXME Should this be fatal, when creating a room? */
 				janus_mutex_unlock(&rooms_mutex);
-				JANUS_LOG(LOG_ERR, "AudioBridge mkdir (%s) error: %d (%s)\n", audiobridge->record_dir, errno, g_strerror(errno));
+				JANUS_LOG(LOG_ERR, "AudioBridge mkdir (%s) error: %d (%s)\n", record_dir_with_base, errno, g_strerror(errno));
 				error_code = JANUS_AUDIOBRIDGE_ERROR_UNKNOWN_ERROR;
+				g_free(record_dir_with_base);
 				g_snprintf(error_cause, 512, "mkdir error: %d (%s)", errno, g_strerror(errno));
 				goto prepare_response;
 			}
+			g_free(record_dir_with_base);
 		}
 		if(room_prev_recording_active != g_atomic_int_get(&audiobridge->record)) {
 			/* Room recording state has changed */
