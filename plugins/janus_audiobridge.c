@@ -7656,14 +7656,15 @@ static void janus_audiobridge_rec_add_wav_header(janus_audiobridge_room *audiobr
 	gint64 now = janus_get_real_time();
 	audiobridge->rec_start_time = now;
 	if(audiobridge->record_file) {
-		g_snprintf(filename, 255, "%s%s%s%s%s%s",
+		g_snprintf(filename, 255, "%s%s%s%s@%"SCNi64"@.wav%s%s",
 			recordings_dir,
 			audiobridge->record_dir ? audiobridge->record_dir : "",
 			audiobridge->record_dir ? "/" : "",
 			audiobridge->record_file,
+			audiobridge->rec_start_time,
 			rec_tempext ? "." : "", rec_tempext ? rec_tempext : "");
 	} else {
-		g_snprintf(filename, 255, "%s%s%sjanus-audioroom-%s-%"SCNi64".wav%s%s",
+		g_snprintf(filename, 255, "%s%s%sjanus-audioroom-%s@%"SCNi64"@.wav%s%s",
 			recordings_dir,
 			audiobridge->record_dir ? audiobridge->record_dir : "",
 			audiobridge->record_dir ? "/" : "",
@@ -7724,13 +7725,14 @@ static void janus_audiobridge_update_wav_header(janus_audiobridge_room *audiobri
 
 	char filename[255];
 	if(audiobridge->record_file) {
-		g_snprintf(filename, 255, "%s%s%s%s",
+		g_snprintf(filename, 255, "%s%s%s%s@%"SCNi64"@.wav",
 			recordings_dir,
 			audiobridge->record_dir ? audiobridge->record_dir : "",
 			audiobridge->record_dir ? "/" : "",
-			audiobridge->record_file);
+			audiobridge->record_file,
+			audiobridge->rec_start_time);
 	} else {
-		g_snprintf(filename, 255, "%s%s%sjanus-audioroom-%s-%"SCNi64".wav",
+		g_snprintf(filename, 255, "%s%s%sjanus-audioroom-%s@%"SCNi64"@.wav",
 			recordings_dir,
 			audiobridge->record_dir ? audiobridge->record_dir : "",
 			audiobridge->record_dir ? "/" : "",
@@ -7740,13 +7742,14 @@ static void janus_audiobridge_update_wav_header(janus_audiobridge_room *audiobri
 		/* We need to rename the file, to remove the temporary extension */
 		char extfilename[255];
 		if(audiobridge->record_file) {
-			g_snprintf(extfilename, 255, "%s%s%s%s.%s",
+			g_snprintf(extfilename, 255, "%s%s%s%s@%"SCNi64"@.wav.%s",
 				recordings_dir,
 				audiobridge->record_dir ? audiobridge->record_dir : "",
 				audiobridge->record_dir ? "/" : "",
-				audiobridge->record_file, rec_tempext);
+				audiobridge->record_file, 
+				audiobridge->rec_start_time, rec_tempext);
 		} else {
-			g_snprintf(extfilename, 255, "%s%s%sjanus-audioroom-%s-%"SCNi64".wav.%s",
+			g_snprintf(extfilename, 255, "%s%s%sjanus-audioroom-%s@%"SCNi64"@.wav.%s",
 				recordings_dir,
 				audiobridge->record_dir ? audiobridge->record_dir : "",
 				audiobridge->record_dir ? "/" : "",
