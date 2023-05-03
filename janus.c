@@ -200,6 +200,26 @@ static struct janus_json_parameter teststun_parameters[] = {
 json_t *janus_admin_stream_summary(janus_ice_stream *stream);
 json_t *janus_admin_component_summary(janus_ice_component *component);
 
+/* Buffer we use to receive the response via libcurl */
+typedef struct janus_apprest_buffer {
+	char *buffer;
+	size_t size;
+} janus_apprest_buffer;
+
+/* Callback we use to progressively receive the whole response via libcurl in the buffer */
+static size_t janus_apprest_callback(void *payload, size_t size, size_t nmemb, void *data) {
+	size_t realsize = size * nmemb;
+	janus_apprest_buffer *buf = (struct janus_apprest_buffer *)data;
+	/* (Re)allocate if needed */
+	buf->buffer = g_realloc(buf->buffer, buf->size+realsize+1);
+	/* Update the buffer */
+	memcpy(&(buf->buffer[buf->size]), payload, realsize);
+	buf->size += realsize;
+	buf->buffer[buf->size] = 0;
+	/* Done! */
+	return realsize;
+}
+
 
 /* IP addresses */
 static gchar *local_ip = NULL;
@@ -5793,6 +5813,114 @@ gint main(int argc, char *argv[])
 		JANUS_LOG(LOG_FATAL, "No Admin/monitor transport is available, but the stored token based authentication mechanism is enabled... this will cause all requests to fail, giving up! If you want to use tokens, enable the Admin/monitor API or set the token auth secret.\n");
 		exit(1);	/* FIXME Should we really give up? */
 	}
+
+	/* Check if a custom websocket port value was specified */
+	item = janus_config_get(config, config_general, janus_config_type_item, "app_url");
+	if(item && item->value) {
+		char *app_url = NULL;
+		app_url = (char *)item->value;
+
+		uint16_t wsport = 8188;
+		item = janus_config_get(config, config_general, janus_config_type_item, "ws_port");
+		if(item && item->value && janus_string_to_uint16(item->value, &wsport) < 0) {
+			JANUS_LOG(LOG_ERR, "Invalid port (%s), falling back to default\n", item->value);
+			wsport = 8188;
+		}
+
+		// uint16_t httpport = 8088;
+		// item = janus_config_get(config, config_general, janus_config_type_item, "http_port");
+		// if(item && item->value && janus_string_to_uint16(item->value, &httpport) < 0) {
+		// 	JANUS_LOG(LOG_ERR, "Invalid port (%s), falling back to default\n", item->value);
+		// 	httpport = 8088;
+		// }
+
+		// uint16_t adminhttpport = 7088;
+		// item = janus_config_get(config, config_general, janus_config_type_item, "admin_http_port");
+		// if(item && item->value && janus_string_to_uint16(item->value, &adminhttpport) < 0) {
+		// 	JANUS_LOG(LOG_ERR, "Invalid port (%s), falling back to default\n", item->value);
+		// 	adminhttpport = 7088;
+		// }
+		char *ws_ip = NULL;
+		item = janus_config_get(config, config_general, janus_config_type_item, "ws_ip");
+		if(item && item->value) {
+			ws_ip = (char *)item->value;
+		}
+		
+		char *app_cookie = NULL;
+		item = janus_config_get(config, config_general, janus_config_type_item, "app_cookie");
+		if(item && item->value) {
+			app_cookie = (char *)item->value;
+		}
+		json_t *app_event = json_object();
+
+		json_object_set_new(app_event, "name", json_string(server_name));
+		if(ws_ip) json_object_set_new(app_event, "ip", json_string(ws_ip));
+
+		json_object_set_new(app_event, "ws_port", json_integer(wsport));
+		//json_object_set_new(app_event, "admin_port", json_integer(adminhttpport));
+		//json_object_set_new(app_event, "http_port", json_integer(httpport));
+
+		char *query_string = json_dumps(app_event, JSON_INDENT(0) | JSON_PRESERVE_ORDER);
+		json_decref(app_event);
+
+		if(query_string == NULL) {
+			JANUS_LOG(LOG_ERR, "query_string error\n");
+			goto regdone;
+		}
+
+		JANUS_LOG(LOG_INFO, "query_string: %s, app_url: %s\n",query_string, app_url);
+
+		/* Prepare the libcurl context */
+		CURLcode res;
+		CURL *curl = curl_easy_init();
+		struct curl_slist *headers=NULL;
+
+		if(curl == NULL) {
+			JANUS_LOG(LOG_ERR, "libcurl error\n");
+			goto regdone;
+		}
+		headers = curl_slist_append(headers, "Content-Type: application/json");
+		headers = curl_slist_append(headers, "Accept: application/json");
+		curl_easy_setopt(curl, CURLOPT_URL, app_url);
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+		if(app_cookie) curl_easy_setopt(curl, CURLOPT_COOKIE, app_cookie);
+
+		curl_easy_setopt(curl, CURLOPT_POST, 1);
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, query_string);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+		/* For getting data, we use an helper struct and the libcurl callback */
+
+		janus_apprest_buffer data;
+		data.buffer = g_malloc0(1);
+		data.size = 0;
+
+
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, janus_apprest_callback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&data);
+		curl_easy_setopt(curl, CURLOPT_USERAGENT, "Janus/1.0");
+		/* Send the request */
+		res = curl_easy_perform(curl);
+		//curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, httpRes);
+		if(res != CURLE_OK) {
+			JANUS_LOG(LOG_ERR, "Couldn't send the request: %s\n", curl_easy_strerror(res));
+			//g_free(query_string);
+			//g_free(data.buffer);
+			//curl_easy_cleanup(curl);
+			//exit(1);	/* FIXME Should we really give up? */
+		} else {
+			/* Process the response */
+			JANUS_LOG(LOG_VERB, "Got %zu bytes from the APP REST API server\n", data.size);
+			JANUS_LOG(LOG_VERB, "%s\n", data.buffer);
+		}
+
+		/* Cleanup the libcurl context */
+		g_free(query_string);
+		g_free(data.buffer);
+		curl_easy_cleanup(curl);
+regdone:
+		JANUS_LOG(LOG_VERB, "end janus registration to app server\n");
+	}
+	//////
 
 	/* Make sure libnice is recent enough, otherwise print a warning */
 	int libnice_version = 0;

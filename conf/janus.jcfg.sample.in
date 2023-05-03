@@ -58,6 +58,12 @@ general: {
 									# as it will appear in an info request
 	#server_instance = 1			# server instace number when multiple janus instaces involved
 									# it will useful to create unique ids accross the janus instance
+										#app_url = "http://appserver/"
+	#app_cookie = "MyAppCookie"
+	#ws_port = 8188
+	#http_port = 8088
+	#admin_http_port = 7088
+	#ws_ip = "192.168.0.1"
 	#session_timeout = 60			# How long (in seconds) we should wait before
 									# deciding a Janus session has timed out. A
 									# session times out when no request is received
