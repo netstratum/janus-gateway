@@ -58,7 +58,8 @@ general: {
 									# as it will appear in an info request
 	#server_instance = 1			# server instace number when multiple janus instaces involved
 									# it will useful to create unique ids accross the janus instance
-										#app_url = "http://appserver/"
+	#app_put_url = "http://appserver/putapi"
+	#app_del_url = "http://appserver/delapi"
 	#app_cookie = "MyAppCookie"
 	#ws_port = 8188
 	#http_port = 8088

@@ -278,6 +278,9 @@ static GMainLoop *mainloop = NULL;
 
 /* Public instance name */
 static gchar *server_name = NULL;
+static gchar *app_del_url = NULL;
+static gchar *app_cookie = NULL;
+
 
 #define DEFAULT_SERVER_INSTANCE	1
 static uint server_instance = DEFAULT_SERVER_INSTANCE;
@@ -548,6 +551,74 @@ static void janus_handle_signal(int signum) {
 			JANUS_PRINT("Ok, leaving immediately...\n");
 			break;
 	}
+
+	if (app_del_url && app_cookie) {
+		json_t *app_event = json_object();
+		json_object_set_new(app_event, "name", json_string(server_name));
+
+		char *query_string = json_dumps(app_event, JSON_INDENT(0) | JSON_PRESERVE_ORDER);
+		json_decref(app_event);
+
+		if(query_string == NULL) {
+			JANUS_LOG(LOG_ERR, "query_string error\n");
+			goto deregdone;
+		}
+
+		JANUS_LOG(LOG_INFO, "query_string: %s, app_del_url: %s\n",query_string, app_del_url);
+
+		/* Prepare the libcurl context */
+		CURLcode res;
+		CURL *curl = curl_easy_init();
+		struct curl_slist *headers=NULL;
+
+		if(curl == NULL) {
+			JANUS_LOG(LOG_ERR, "libcurl error\n");
+			g_free(query_string);
+			goto deregdone;
+		}
+		headers = curl_slist_append(headers, "Content-Type: application/json");
+		headers = curl_slist_append(headers, "Accept: application/json");
+		curl_easy_setopt(curl, CURLOPT_URL, app_del_url);
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+		if(app_cookie) curl_easy_setopt(curl, CURLOPT_COOKIE, app_cookie);
+
+		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, query_string);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+		/* For getting data, we use an helper struct and the libcurl callback */
+
+		janus_apprest_buffer data;
+		data.buffer = g_malloc0(1);
+		data.size = 0;
+
+
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, janus_apprest_callback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&data);
+		curl_easy_setopt(curl, CURLOPT_USERAGENT, "Janus/1.0");
+		/* Send the request */
+		res = curl_easy_perform(curl);
+		//curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, httpRes);
+		if(res != CURLE_OK) {
+			JANUS_LOG(LOG_ERR, "Couldn't send the request: %s\n", curl_easy_strerror(res));
+			//g_free(query_string);
+			//g_free(data.buffer);
+			//curl_easy_cleanup(curl);
+			//exit(1);	/* FIXME Should we really give up? */
+		} else {
+			/* Process the response */
+			JANUS_LOG(LOG_VERB, "Got %zu bytes from the APP REST API server\n", data.size);
+			JANUS_LOG(LOG_VERB, "%s\n", data.buffer);
+		}
+
+		/* Cleanup the libcurl context */
+		g_free(query_string);
+		g_free(data.buffer);
+		curl_easy_cleanup(curl);
+	deregdone:
+		JANUS_LOG(LOG_VERB, "end janus de-registration to app server\n");
+	}
+	//////	
+	
 	g_atomic_int_inc(&stop);
 	if(g_atomic_int_get(&stop) > 2)
 		exit(1);
@@ -559,6 +630,8 @@ static void janus_handle_signal(int signum) {
 static void janus_termination_handler(void) {
 	/* Free the instance name, if provided */
 	g_free(server_name);
+	g_free(app_del_url);
+	g_free(app_cookie);
 	/* Remove the PID file if we created it */
 	janus_pidfile_remove();
 	/* Close the logger */
@@ -5815,10 +5888,15 @@ gint main(int argc, char *argv[])
 	}
 
 	/* Check if a custom websocket port value was specified */
-	item = janus_config_get(config, config_general, janus_config_type_item, "app_url");
+	item = janus_config_get(config, config_general, janus_config_type_item, "app_put_url");
 	if(item && item->value) {
-		char *app_url = NULL;
-		app_url = (char *)item->value;
+		char *app_put_url = NULL;
+		app_put_url = (char *)item->value;
+		
+		item = janus_config_get(config, config_general, janus_config_type_item, "app_del_url");
+		if(item && item->value) {
+			app_del_url = g_strdup(item->value);
+		}
 
 		uint16_t wsport = 8188;
 		item = janus_config_get(config, config_general, janus_config_type_item, "ws_port");
@@ -5846,10 +5924,11 @@ gint main(int argc, char *argv[])
 			ws_ip = (char *)item->value;
 		}
 		
-		char *app_cookie = NULL;
+		//char *app_cookie = NULL;
 		item = janus_config_get(config, config_general, janus_config_type_item, "app_cookie");
 		if(item && item->value) {
-			app_cookie = (char *)item->value;
+			//app_cookie = (char *)item->value;
+			app_cookie = g_strdup(item->value);
 		}
 		json_t *app_event = json_object();
 
@@ -5868,7 +5947,7 @@ gint main(int argc, char *argv[])
 			goto regdone;
 		}
 
-		JANUS_LOG(LOG_INFO, "query_string: %s, app_url: %s\n",query_string, app_url);
+		JANUS_LOG(LOG_INFO, "query_string: %s, app_put_url: %s\n",query_string, app_put_url);
 
 		/* Prepare the libcurl context */
 		CURLcode res;
@@ -5877,17 +5956,19 @@ gint main(int argc, char *argv[])
 
 		if(curl == NULL) {
 			JANUS_LOG(LOG_ERR, "libcurl error\n");
+			g_free(query_string);
 			goto regdone;
 		}
+		
 		headers = curl_slist_append(headers, "Content-Type: application/json");
 		headers = curl_slist_append(headers, "Accept: application/json");
-		curl_easy_setopt(curl, CURLOPT_URL, app_url);
+		curl_easy_setopt(curl, CURLOPT_URL, app_put_url);
 		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 		if(app_cookie) curl_easy_setopt(curl, CURLOPT_COOKIE, app_cookie);
 
 		curl_easy_setopt(curl, CURLOPT_POST, 1);
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, query_string);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 1L);
 		/* For getting data, we use an helper struct and the libcurl callback */
 
 		janus_apprest_buffer data;
