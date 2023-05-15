@@ -584,7 +584,7 @@ static void janus_handle_signal(int signum) {
 
 		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, query_string);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
 		/* For getting data, we use an helper struct and the libcurl callback */
 
 		janus_apprest_buffer data;
@@ -5968,7 +5968,7 @@ gint main(int argc, char *argv[])
 
 		curl_easy_setopt(curl, CURLOPT_POST, 1);
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, query_string);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 1L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
 		/* For getting data, we use an helper struct and the libcurl callback */
 
 		janus_apprest_buffer data;
