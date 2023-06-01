@@ -60,6 +60,7 @@ general: {
 									# it will useful to create unique ids accross the janus instance
 	#app_put_url = "http://appserver/putapi"
 	#app_del_url = "http://appserver/delapi"
+	#app_req_timeout = 5			# application registration request timeout in seconds
 	#app_cookie = "MyAppCookie"
 	#ws_port = 8188
 	#http_port = 8088

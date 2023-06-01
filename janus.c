@@ -280,6 +280,7 @@ static GMainLoop *mainloop = NULL;
 static gchar *server_name = NULL;
 static gchar *app_del_url = NULL;
 static gchar *app_cookie = NULL;
+uint64_t app_req_timeout = 5;
 
 
 #define DEFAULT_SERVER_INSTANCE	1
@@ -584,7 +585,7 @@ static void janus_handle_signal(int signum) {
 
 		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, query_string);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, app_req_timeout);
 		/* For getting data, we use an helper struct and the libcurl callback */
 
 		janus_apprest_buffer data;
@@ -5924,6 +5925,12 @@ gint main(int argc, char *argv[])
 			ws_ip = (char *)item->value;
 		}
 		
+		item = janus_config_get(config, config_general, janus_config_type_item, "app_req_timeout");
+		if(item && item->value && janus_string_to_uint16(item->value, &app_req_timeout) < 0) {
+			JANUS_LOG(LOG_ERR, "Invalid app_req_timeout (%s), falling back to default\n", item->value);
+			app_req_timeout = 5;
+		}
+
 		//char *app_cookie = NULL;
 		item = janus_config_get(config, config_general, janus_config_type_item, "app_cookie");
 		if(item && item->value) {
@@ -5968,7 +5975,7 @@ gint main(int argc, char *argv[])
 
 		curl_easy_setopt(curl, CURLOPT_POST, 1);
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, query_string);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, app_req_timeout);
 		/* For getting data, we use an helper struct and the libcurl callback */
 
 		janus_apprest_buffer data;
