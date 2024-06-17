@@ -1539,22 +1539,29 @@ static json_t *janus_sip_get_incoming_headers(const sip_t *sip, const janus_sip_
 	json_t *headers = json_object();
 	if(!sip)
 		return headers;
-	sip_unknown_t *unknown_header = sip->sip_unknown;
-	while(unknown_header != NULL) {
-		GList *temp = session->incoming_header_prefixes;
-		while(temp != NULL) {
-			char *header_prefix = (char *)temp->data;
-			if(header_prefix != NULL && unknown_header->un_name != NULL) {
-				if(strncasecmp(unknown_header->un_name, header_prefix, strlen(header_prefix)) == 0) {
-					const char *header_name = g_strdup(unknown_header->un_name);
-					json_object_set(headers, header_name, json_string(unknown_header->un_value));
-					break;
-				}
-			}
-			temp = temp->next;
+
+        GList *temp = session->incoming_header_prefixes;
+        while(temp != NULL) {
+                char *header_prefix = (char *)temp->data;
+                sip_unknown_t *unknown_header = sip->sip_unknown;
+                json_t *array = json_array();
+
+	        while(unknown_header != NULL) {
+
+                        if(header_prefix != NULL && unknown_header->un_name != NULL) {
+                                if(strncasecmp(unknown_header->un_name, header_prefix, strlen(header_prefix)) == 0) {
+                                        json_array_append(array, json_string(unknown_header->un_value));
+                                }
+                        }
+	                unknown_header = unknown_header->un_next;
+                }
+
+		if (json_array_size(array)) {
+                	json_object_set(headers, header_prefix, array);
 		}
-		unknown_header = unknown_header->un_next;
-	}
+                temp = temp->next;
+
+        }
 	return headers;
 }
 
