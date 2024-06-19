@@ -4197,7 +4197,7 @@ static void *janus_sip_handler(void *data) {
 			if(session->stack->s_nh_i == NULL) {
 				JANUS_LOG(LOG_WARN, "NUA Handle for 200 OK still null??\n");
 			}
-			int response_code = 486;
+			int response_code = 603;
 			json_t *code_json = json_object_get(root, "code");
 			if(code_json)
 				response_code = json_integer_value(code_json);
@@ -5043,8 +5043,15 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				session->hangup_reason_header = NULL;
 				session->hangup_reason_header_protocol = NULL;
 				session->hangup_reason_header_cause = NULL;
-				if(g_atomic_int_get(&session->establishing) || g_atomic_int_get(&session->established))
-					gateway->close_pc(session->handle);
+				if(g_atomic_int_get(&session->establishing) || g_atomic_int_get(&session->established)) {
+					if(session->media.has_audio || session->media.has_video) {
+						/* Get rid of the PeerConnection in the core */
+						gateway->close_pc(session->handle);
+					} else {
+						/* No SDP was exchanged, just clean up locally */
+						janus_sip_hangup_media_internal(session->handle);
+					}
+				}
 			} else if(session->stack->s_nh_i == nh && callstate == nua_callstate_calling && session->status == janus_sip_call_status_incall) {
 				/* Have just sent re-INVITE */
 				janus_sip_call_update_status(session, janus_sip_call_status_incall_reinviting);
