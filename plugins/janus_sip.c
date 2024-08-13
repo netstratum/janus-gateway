@@ -5281,8 +5281,9 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				json_object_set_new(calling, "event", json_string("updatingcallinfo"));
 				//json_object_set_new(calling, "username", json_string(session->callee));
 				if(sip->sip_from->a_url) {
-						char *caller_text = url_as_string(session->stack->s_home, sip->sip_from->a_url);
-				json_object_set_new(calling, "username", json_string(caller_text));
+						char *ev_caller_text = url_as_string(session->stack->s_home, sip->sip_from->a_url);
+						json_object_set_new(calling, "username", json_string(ev_caller_text));
+						su_free(session->stack->s_home, ev_caller_text);
 				}
 				if(session->callid)
 						json_object_set_new(calling, "call_id", json_string(session->callid));
@@ -5291,6 +5292,8 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				}
 				char *callee_text = url_as_string(session->stack->s_home, sip->sip_to->a_url);
 				json_object_set_new(calling, "callee", json_string(callee_text));
+				su_free(session->stack->s_home, callee_text);
+
 				if(session->incoming_header_prefixes) {
 						json_t *headers = janus_sip_get_incoming_headers(sip, session);
 						json_object_set_new(calling, "headers", headers);
@@ -5313,7 +5316,7 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->transaction, call, NULL);
 				JANUS_LOG(LOG_VERB, "  >> Pushing event to peer: %d (%s)\n", ret, janus_get_api_error(ret));
 				json_decref(call);
-
+				g_free(referred_by);
 				janus_sdp_destroy(sdp);
 				break;
 			}
