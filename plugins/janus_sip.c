@@ -5258,7 +5258,8 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 					break;
 				}
 			}
-			if(reinvite && session->media.autoaccept_reinvites) {
+			
+			if(reinvite && (!sdp || session->media.autoaccept_reinvites)) {
 				/* No need to involve the application: we reply ourselves */
 				nua_respond(nh, 200, sip_status_phrase(200), TAG_END());
 				/* Check if there's an isfocus feature parameter in the Contact header */
@@ -5279,10 +5280,10 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				json_object_set_new(call, "sip", json_string("event"));
 				json_t *calling = json_object();
 				json_object_set_new(calling, "event", json_string("updatingcallinfo"));
-				//json_object_set_new(calling, "username", json_string(session->callee));
+				json_object_set_new(calling, "username", json_string(session->callee));
 				if(sip->sip_from->a_url) {
 						char *ev_caller_text = url_as_string(session->stack->s_home, sip->sip_from->a_url);
-						json_object_set_new(calling, "username", json_string(ev_caller_text));
+						json_object_set_new(calling, "updatedusername", json_string(ev_caller_text));
 						su_free(session->stack->s_home, ev_caller_text);
 				}
 				if(session->callid)
@@ -5348,6 +5349,11 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			json_t *calling = json_object();
 			json_object_set_new(calling, "event", json_string(reinvite ? "updatingcall" : "incomingcall"));
 			json_object_set_new(calling, "username", json_string(session->callee));
+			if(reinvite && sip->sip_from->a_url) {
+				char *ev_caller_text = url_as_string(session->stack->s_home, sip->sip_from->a_url);
+				json_object_set_new(calling, "updatedusername", json_string(ev_caller_text));
+				su_free(session->stack->s_home, ev_caller_text);
+			}
 			if(session->callid)
 				json_object_set_new(calling, "call_id", json_string(session->callid));
 			if(sip->sip_from->a_display) {
