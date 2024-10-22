@@ -5075,6 +5075,32 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				JANUS_LOG(LOG_VERB, "This ACK contains a payload, probably as a result of an offerless INVITE: simulating 200 OK...\n");
 				janus_sip_sofia_callback(nua_r_invite, 700, "ACK", nua, magic, nh, hmagic, sip, tags);
 			}
+
+			/* Notify the application about the re-INVITE callInfo*/
+			json_t *call = json_object();
+			json_object_set_new(call, "sip", json_string("event"));
+			json_t *calling = json_object();
+			json_object_set_new(calling, "event", json_string("updatingcallinfo"));
+			json_object_set_new(calling, "username", json_string(session->callee));
+			if(sip->sip_from->a_url) {
+					char *ev_caller_text = url_as_string(session->stack->s_home, sip->sip_from->a_url);
+					json_object_set_new(calling, "updatedusername", json_string(ev_caller_text));
+					su_free(session->stack->s_home, ev_caller_text);
+			}
+			if(session->callid)
+					json_object_set_new(calling, "call_id", json_string(session->callid));
+			if(sip->sip_from->a_display) {
+					json_object_set_new(calling, "displayname", json_string(sip->sip_from->a_display));
+			}
+			char *callee_text = url_as_string(session->stack->s_home, sip->sip_to->a_url);
+			json_object_set_new(calling, "callee", json_string(callee_text));
+			su_free(session->stack->s_home, callee_text);
+
+			json_object_set_new(call, "result", calling);
+			json_object_set_new(call, "call_id", json_string(session->callid));
+			int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->transaction, call, NULL);
+			JANUS_LOG(LOG_VERB, "  >> Pushing event to peer: %d (%s)\n", ret, janus_get_api_error(ret));
+			json_decref(call);
 			break;
 		}
 		case nua_i_outbound:
