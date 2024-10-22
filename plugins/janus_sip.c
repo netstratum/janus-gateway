@@ -5146,13 +5146,13 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				}
 			}
 
-			if(janus_sip_call_is_established(session)) {
-				JANUS_LOG(LOG_VERB, "respond UPDATE with 200 OK...\n");
-				nua_respond(nh, 200, sip_status_phrase(200), TAG_END());
-			} else {
-				JANUS_LOG(LOG_VERB, "respond UPDATE with 405 Method not allowed...\n");
-				nua_respond(nh, 405, sip_status_phrase(405), TAG_END());
-			}
+			// if(janus_sip_call_is_established(session)) {
+			// 	JANUS_LOG(LOG_VERB, "respond UPDATE with 200 OK...\n");
+			// 	nua_respond(nh, 200, sip_status_phrase(200), TAG_END());
+			// } else {
+			// 	JANUS_LOG(LOG_VERB, "respond UPDATE with 405 Method not allowed...\n");
+			// 	nua_respond(nh, 405, sip_status_phrase(405), TAG_END());
+			// }
 			/* Check if there's an isfocus feature parameter in the Contact header */
 			gboolean is_focus = FALSE;
 			if(sip->sip_contact && sip->sip_contact->m_params) {
