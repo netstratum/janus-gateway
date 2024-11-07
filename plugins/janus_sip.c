@@ -5092,10 +5092,15 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			if(sip->sip_from->a_display) {
 					json_object_set_new(calling, "displayname", json_string(sip->sip_from->a_display));
 			}
+
 			char *callee_text = url_as_string(session->stack->s_home, sip->sip_to->a_url);
 			json_object_set_new(calling, "callee", json_string(callee_text));
 			su_free(session->stack->s_home, callee_text);
-
+			
+			if(session->incoming_header_prefixes) {
+					json_t *headers = janus_sip_get_incoming_headers(sip, session);
+					json_object_set_new(calling, "headers", headers);
+			}
 			json_object_set_new(call, "result", calling);
 			json_object_set_new(call, "call_id", json_string(session->callid));
 			int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->transaction, call, NULL);
