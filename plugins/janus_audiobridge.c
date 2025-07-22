@@ -7300,6 +7300,7 @@ static void *janus_audiobridge_handler(void *data) {
 					json_object_set_new(pl, "spatial_position", json_integer(p->spatial_position));
 				json_array_append_new(list, pl);
 			}
+			
 			event = json_object();
 			json_object_set_new(event, "audiobridge", json_string("roomchanged"));
 			json_object_set_new(event, "room",

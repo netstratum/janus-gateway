@@ -702,7 +702,10 @@
 #define JANUS_SIP_AUTHOR			"Meetecho s.r.l."
 #define JANUS_SIP_PACKAGE			"janus.plugin.sip"
 
+static janus_conf_callbacks *conf_gateway = NULL;
+
 /* Plugin methods */
+janus_conf_plugin *conf_create(janus_conf_callbacks *callback);
 janus_plugin *create(void);
 int janus_sip_init(janus_callbacks *callback, const char *config_path);
 void janus_sip_destroy(void);
@@ -721,7 +724,8 @@ void janus_sip_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *pa
 void janus_sip_hangup_media(janus_plugin_session *handle);
 void janus_sip_destroy_session(janus_plugin_session *handle, int *error);
 json_t *janus_sip_query_session(janus_plugin_session *handle);
-
+void janus_sip_conf_handle_message(char *in, size_t len, void *user);
+void *janus_sip_conf_get_handle(void *user);
 /* Plugin setup */
 static janus_plugin janus_sip_plugin =
 	JANUS_PLUGIN_INIT (
@@ -746,6 +750,24 @@ static janus_plugin janus_sip_plugin =
 		.query_session = janus_sip_query_session,
 	);
 
+	/* Plugin setup */
+static janus_conf_plugin janus_sip_conf_plugin =
+	JANUS_CONF_PLUGIN_INIT (
+		.handle_conf_message = janus_sip_conf_handle_message,
+		.get_handle = janus_sip_conf_get_handle,
+	);
+
+/* Transport creator */
+janus_conf_plugin *conf_create(janus_conf_callbacks *callback) {
+	JANUS_LOG(LOG_VERB, "%s conference created!\n", JANUS_SIP_NAME);
+    if (callback == NULL) return NULL;
+
+    conf_gateway = callback;
+
+	return &janus_sip_conf_plugin;
+}
+
+
 /* Plugin creator */
 janus_plugin *create(void) {
 	JANUS_LOG(LOG_VERB, "%s created!\n", JANUS_SIP_NAME);
@@ -753,6 +775,10 @@ janus_plugin *create(void) {
 }
 
 /* Parameter validation */
+static struct janus_json_parameter incoming_events_parameters[] = {
+	{"janus", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
+};
+
 static struct janus_json_parameter request_parameters[] = {
 	{"request", JSON_STRING, JANUS_JSON_PARAM_REQUIRED}
 };
@@ -844,7 +870,12 @@ static struct janus_json_parameter sipmessage_parameters[] = {
 	{"headers", JSON_OBJECT, 0},
 	{"call_id", JANUS_JSON_STRING, 0}
 };
-
+static struct janus_json_parameter conference_parameters[] = {
+	{"room", JSON_INTEGER, JANUS_JSON_PARAM_REQUIRED | JANUS_JSON_PARAM_POSITIVE},
+	{"instance_ip", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
+	{"instance_port", JSON_INTEGER, JANUS_JSON_PARAM_REQUIRED | JANUS_JSON_PARAM_POSITIVE},
+	{"call_leg_type", JSON_STRING, JANUS_JSON_PARAM_REQUIRED}
+};
 /* Useful stuff */
 static volatile gint initialized = 0, stopping = 0;
 static gboolean notify_events = TRUE;
@@ -890,6 +921,12 @@ typedef enum {
 	janus_sip_registration_status_registered,
 	janus_sip_registration_status_unregistering,
 } janus_sip_registration_status;
+
+typedef enum {
+	janus_session_connection_none = 0,
+	janus_session_connection_initiator = 1,
+	janus_session_connection_listener	= 2,	
+} janus_session_connection_type;
 
 static const char *janus_sip_registration_status_string(janus_sip_registration_status status) {
 	switch(status) {
@@ -997,6 +1034,11 @@ typedef struct janus_sip_account {
 	janus_sip_registration_status registration_status;
 } janus_sip_account;
 
+typedef struct janus_sip_conference {
+	GThread *initiator_thread;
+	GThread *peer_thread;
+} janus_sip_conf;
+
 typedef struct janus_sip_media {
 	char *remote_audio_ip;			/* Peer audio media IP address */
 	char *remote_video_ip;			/* Peer video media IP address */
@@ -1041,6 +1083,7 @@ typedef struct janus_sip_media {
 	gboolean updated;
 	int video_orientation_extension_id;
 	int audio_level_extension_id;
+	janus_sip_conf conf;
 } janus_sip_media;
 
 typedef struct janus_sip_session {
@@ -1050,10 +1093,13 @@ typedef struct janus_sip_session {
 	janus_sip_call_status status;
 	janus_sip_media media;
 	char *transaction;
+	char *conf_transaction;
 	char *callee;
 	char *callid;
 	guint32 refer_id;			/* In case we were asked to transfer, keep track of the ID */
 	janus_sdp *sdp;				/* The SDP this user sent */
+	char *sip_pl_data;			/* The SIP payload data */
+	volatile janus_session_connection_type connection_type;		/* */
 	janus_recorder *arc;		/* The Janus recorder instance for this user's audio, if enabled */
 	janus_recorder *arc_peer;	/* The Janus recorder instance for the peer's audio, if enabled */
 	janus_recorder *vrc;		/* The Janus recorder instance for this user's video, if enabled */
@@ -1074,8 +1120,40 @@ typedef struct janus_sip_session {
 	char *hangup_reason_header_cause;
 	GList *incoming_header_prefixes;
 	GList *active_calls;
+	void *leg_thread;
 	janus_refcount ref;
 } janus_sip_session;
+
+typedef struct janus_sip_conference_leg_thread {
+	char *conf_remote_audio_ip;			/* Peer audio media IP address */
+	int conf_audio_rtp_fd;
+	int local_conf_audio_rtp_port, remote_conf_audio_rtp_port;
+	int confPipefd[2];
+	char call_leg_type[16];
+	guint64 room_id;
+	char *instance_ip;
+	guint16 instance_port;
+	volatile janus_session_connection_type connection_type;
+	GThread *leg_thread;
+	janus_sip_session *session;
+	janus_plugin_session *plugin_session;
+	void *ws_data;
+	guint64 sip_session_id;
+	guint64 sip_handle_id;
+	guint64 session_id;
+	guint64 handle_id;
+	guint64 participant_id;
+	guint64 local_session_id;
+	guint64 local_handle_id;
+	volatile gint conference_ended;
+	volatile gint session_destroyed;
+	volatile gint handle_detached;
+	void *core_session;
+	gboolean request_inprogress;
+	janus_mutex mutex;			/* Mutex to lock this room instance */
+	janus_refcount ref;			/* Reference counter for this room */
+} janus_sip_conf_leg_thread_t;
+
 static GHashTable *sessions;
 static GHashTable *identities;
 static GHashTable *callids;
@@ -1086,6 +1164,9 @@ static janus_mutex sessions_mutex = JANUS_MUTEX_INITIALIZER;
 
 static void janus_sip_srtp_cleanup(janus_sip_session *session);
 static void janus_sip_media_reset(janus_sip_session *session);
+
+static int janus_sip_call_join(janus_sip_conf_leg_thread_t *janus_sip_conf_leg_thread, janus_session_connection_type connection_type);
+static void janus_conference_cleanup(janus_sip_conf_leg_thread_t *leg_thread);
 
 static void janus_sip_call_update_status(janus_sip_session *session, janus_sip_call_status new_status) {
 	if(session->status != new_status) {
@@ -1126,11 +1207,13 @@ static void janus_sip_session_free(const janus_refcount *session_ref) {
 		g_free(session->account.identity);
 		session->account.identity = NULL;
 	}
+	
 	if(session->stack != NULL) {
 		su_home_deinit(session->stack->s_home);
 		su_home_unref(session->stack->s_home);
 		g_free(session->stack->contact_header);
 		g_free(session->stack);
+		JANUS_LOG(LOG_INFO, "TEST:Sofia stack destroyed\n");
 		session->stack = NULL;
 	}
 	if(session->account.proxy) {
@@ -1177,6 +1260,17 @@ static void janus_sip_session_free(const janus_refcount *session_ref) {
 		g_free(session->transaction);
 		session->transaction = NULL;
 	}
+
+	if(session->conf_transaction) {
+		g_free(session->conf_transaction);
+		session->conf_transaction = NULL;
+	}
+
+	if(session->sip_pl_data) {
+		g_free(session->sip_pl_data);
+		session->sip_pl_data = NULL;
+	}
+
 	if(session->media.remote_audio_ip) {
 		g_free(session->media.remote_audio_ip);
 		session->media.remote_audio_ip = NULL;
@@ -1491,6 +1585,19 @@ static void janus_sip_media_reset(janus_sip_session *session) {
 
 /* Sofia Event thread */
 gpointer janus_sip_sofia_thread(gpointer user_data);
+static void *janus_conf_thread(void *data);
+static void create_session(janus_sip_conf_leg_thread_t *leg_thread);
+static void attach_handle(janus_sip_conf_leg_thread_t *leg_thread);
+static void detach_handle(janus_sip_conf_leg_thread_t *leg_thread);
+static void destroy_session(janus_sip_conf_leg_thread_t *leg_thread);
+static void join_audiobridge(janus_sip_conf_leg_thread_t *leg_thread);
+static void configure_audiobridge(janus_sip_conf_leg_thread_t *leg_thread);
+static void leave_audiobridge(janus_sip_conf_leg_thread_t *leg_thread);
+
+static void send_success_event(janus_sip_session *session, gint64 room_id, const char *event_name);
+static void send_error_event(janus_sip_session *session, gint64 room_id, int error_code, const char *error_cause);
+static void keepalive_session(janus_sip_conf_leg_thread_t *leg_thread);
+
 /* Sofia callbacks */
 void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase, nua_t *nua, nua_magic_t *magic, nua_handle_t *nh, nua_hmagic_t *hmagic, sip_t const *sip, tagi_t tags[]);
 /* SDP parsing and manipulation */
@@ -1582,6 +1689,11 @@ static json_t *janus_sip_get_incoming_headers(const sip_t *sip, const janus_sip_
 #define JANUS_SIP_ERROR_TOO_STRICT			452
 #define JANUS_SIP_ERROR_HELPER_ERROR		453
 #define JANUS_SIP_ERROR_NO_SUCH_CALLID		454
+
+#define JANUS_SIP_ERROR_WEBSOCKET_CONNECT_ERROR			460
+#define JANUS_SIP_ERROR_CONFERENCE_PLUGIN_SESSION_ERROR	461
+#define JANUS_SIP_ERROR_CONFERENCE_THREAD_ERROR     	462
+#define JANUS_SIP_ERROR_UNKNOWN_CONFERENCE_ERROR		470
 
 
 /* Random string helper (for call-ids) */
@@ -2134,9 +2246,13 @@ void janus_sip_create_session(janus_plugin_session *handle, int *error) {
 	session->status = janus_sip_call_status_idle;
 	session->stack = NULL;
 	session->transaction = NULL;
+	session->conf_transaction = NULL;
+	session->sip_pl_data = NULL;
+	session->connection_type = janus_session_connection_none;
 	session->callee = NULL;
 	session->callid = NULL;
 	session->sdp = NULL;
+	session->leg_thread = NULL;
 	session->hangup_reason_header = NULL;
 	session->hangup_reason_header_protocol = NULL;
 	session->hangup_reason_header_cause = NULL;
@@ -2346,6 +2462,133 @@ json_t *janus_sip_query_session(janus_plugin_session *handle) {
 	return info;
 }
 
+void *janus_sip_conf_get_handle(void *user) {
+	janus_sip_conf_leg_thread_t *janus_sip_conf_leg_thread = (janus_sip_conf_leg_thread_t *)user;
+	return janus_sip_conf_leg_thread->plugin_session->gateway_handle;
+}
+
+void janus_sip_conf_handle_message(char *in, size_t len, void *user) {
+	janus_sip_conf_leg_thread_t *janus_sip_conf_leg_thread = (janus_sip_conf_leg_thread_t *)user;
+	int error_code = 0;
+	char error_cause[512];
+	//int ret;
+	if (!janus_sip_conf_leg_thread) {
+		JANUS_LOG(LOG_ERR, "janus_sip_conf_handle_message: janus_sip_conf_leg_thread is NULL\n");
+		return;
+	}
+
+	json_error_t error;
+	json_t *root = json_loads(in, 0, &error);
+
+	JANUS_VALIDATE_JSON_OBJECT(root, incoming_events_parameters,
+		error_code, error_cause, FALSE,
+		JANUS_ERROR_MISSING_MANDATORY_ELEMENT, JANUS_ERROR_INVALID_ELEMENT_TYPE);
+	if(error_code != 0) {
+		JANUS_LOG(LOG_ERR, "janus_sip_conf_handle_message: error_code: %d\n", error_code);
+	//	ret = janus_process_error_string(request, session_id, NULL, error_code, error_cause);
+		goto jsondone;
+	}
+
+	// json_t *transaction = json_object_get(root, "transaction");
+	// const gchar *transaction_text = json_string_value(transaction);
+	json_t *message = json_object_get(root, "janus");
+	const gchar *message_text = json_string_value(message);
+	
+// 	{
+//    "janus": "success",
+//    "transaction": "8W8ktgojUXWr",
+//    "data": {
+//       "session_id": janus
+//    }
+// }
+
+	if (!strcasecmp(message_text, "success")) {
+		json_t *data = json_object_get(root, "data");
+		if (data == NULL) {
+				json_t *session_id = json_object_get(root, "session_id");
+				if (session_id) {
+					g_atomic_int_set(&janus_sip_conf_leg_thread->session_destroyed, TRUE);
+				}
+
+			goto jsondone;
+		}
+		
+		if(!janus_sip_conf_leg_thread->session_id) {
+			janus_sip_conf_leg_thread->session_id = (guint64)json_integer_value(json_object_get(data, "id"));
+			attach_handle(janus_sip_conf_leg_thread);
+		} else {
+			janus_sip_conf_leg_thread->handle_id = (guint64)json_integer_value(json_object_get(data, "id"));
+			join_audiobridge(janus_sip_conf_leg_thread);
+		}
+	} else if (!strcasecmp(message_text, "hangup")) {
+		JANUS_LOG(LOG_INFO, "[%s-%"SCNu64"] conference ended\n", JANUS_SIP_PACKAGE, janus_sip_conf_leg_thread->handle_id);
+		g_atomic_int_set(&janus_sip_conf_leg_thread->conference_ended, TRUE);
+		//detach_handle(janus_sip_conf_leg_thread);
+	} else if (!strcasecmp(message_text, "detached")) {
+		g_atomic_int_set(&janus_sip_conf_leg_thread->handle_detached, TRUE);
+		//destroy_session(janus_sip_conf_leg_thread);
+	} else if (!strcasecmp(message_text, "webrtcup")) {
+		JANUS_LOG(LOG_INFO, "[%s-%"SCNu64"] WebRTC up\n", JANUS_SIP_PACKAGE, janus_sip_conf_leg_thread->handle_id);
+		janus_sip_session *session = (janus_sip_session *)janus_sip_conf_leg_thread->plugin_session->plugin_handle;
+
+		//TODO: media
+		janus_sip_call_update_status(session, janus_sip_call_status_incall);
+		session->connection_type = janus_sip_conf_leg_thread->connection_type;
+		janus_sip_conf_leg_thread->session->connection_type = janus_session_connection_initiator;
+
+	} else if (!strcasecmp(message_text, "media")) {
+			JANUS_LOG(LOG_INFO, "[%s-%"SCNu64"] media received\n", JANUS_SIP_PACKAGE, janus_sip_conf_leg_thread->handle_id);
+			send_success_event(janus_sip_conf_leg_thread->session, janus_sip_conf_leg_thread->room_id, "listened");
+	} else if (!strcasecmp(message_text, "event")) {
+		json_t *plugin_data = json_object_get(root, "plugindata");
+		json_t *data = json_object_get(plugin_data, "data");
+		JANUS_LOG(LOG_INFO, "[%s-%"SCNu64"] event\n", JANUS_SIP_PACKAGE, janus_sip_conf_leg_thread->handle_id);
+
+		json_t *event_type = json_object_get(data, "audiobridge");
+		const gchar *event_type_text = json_string_value(event_type);
+		if(!strcasecmp(event_type_text, "joined")) {
+			//{"janus": "event", "session_id": 40553012763431, "transaction": "b095d490-1369-446f-94de-6ba3dda7219b", 
+			//"sender": 40001141920888, "plugindata": {"plugin": "janus.plugin.audiobridge",
+			// "data": {"audiobridge": "joined", "room": 1234, "id": 40609922387690, "participants": []}}}
+
+			json_t *participant_id = json_object_get(data, "id");
+			JANUS_LOG(LOG_INFO, "[%s-%"SCNu64"] joined event\n", JANUS_SIP_PACKAGE, janus_sip_conf_leg_thread->handle_id);
+			if (participant_id == NULL) {
+				JANUS_LOG(LOG_DBG, "[%s-%"SCNu64"] Received another joinee event\n", JANUS_SIP_PACKAGE, janus_sip_conf_leg_thread->handle_id);
+				goto jsondone;
+			}
+			janus_sip_conf_leg_thread->participant_id = (guint64)json_integer_value(participant_id);
+			configure_audiobridge(janus_sip_conf_leg_thread);
+		} else if (!strcasecmp(event_type_text, "event")) {
+			json_t *result_type = json_object_get(data, "result");
+
+			if (result_type) {
+				const gchar *result_type_text = json_string_value(result_type);
+				if (!strcasecmp(result_type_text, "ok")) {
+					//json_t *jsep_answer = json_object_get(root, "jsep");
+					JANUS_LOG(LOG_INFO, "[%s-%"SCNu64"] configured ok event\n", JANUS_SIP_PACKAGE, janus_sip_conf_leg_thread->handle_id);
+				}
+				goto jsondone;
+			}
+
+			json_t *left_type = json_object_get(data, "left");
+
+			if (left_type) {
+				const gchar *left_type_type_text = json_string_value(left_type);
+				if (!strcasecmp(left_type_type_text, "ok")) {
+					JANUS_LOG(LOG_INFO, "[%s-%"SCNu64"] left ok event\n", JANUS_SIP_PACKAGE, janus_sip_conf_leg_thread->handle_id);
+					goto jsondone;
+				}
+			}
+		}
+	} else if (!strcasecmp(message_text, "ack")) {
+		conf_gateway->keepalive_session(janus_sip_conf_leg_thread->core_session);
+	}
+
+jsondone:
+	json_decref(root);
+	return;
+}
 struct janus_plugin_result *janus_sip_handle_message(janus_plugin_session *handle, char *transaction, json_t *message, json_t *jsep) {
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return janus_plugin_result_new(JANUS_PLUGIN_ERROR, g_atomic_int_get(&stopping) ? "Shutting down" : "Plugin not initialized", NULL);
@@ -2394,8 +2637,10 @@ void janus_sip_setup_media(janus_plugin_session *handle) {
 }
 
 void janus_sip_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *packet) {
-	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
+	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
+		JANUS_LOG(LOG_ERR, "TEST:something went wrong...\n");
 		return;
+	}
 	if(gateway) {
 		/* Honour the audio/video active flags */
 		janus_sip_session *session = (janus_sip_session *)handle->plugin_handle;
@@ -2403,8 +2648,26 @@ void janus_sip_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *pack
 			JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 			return;
 		}
-		if(!janus_sip_call_is_established(session))
+		
+		if (session->connection_type == janus_session_connection_listener) {
+			janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
+			if (leg_thread) {
+				session = leg_thread->session;
+				if (session == NULL) {
+					JANUS_LOG(LOG_INFO, "ERROR: session is NULL in Listener incoming RTP...\n");
+					return;
+				}
+			}
+		} else if (session->connection_type == janus_session_connection_initiator) {
+			//JANUS_LOG(LOG_INFO, "TEST: drop incoming RTP...\n");										
 			return;
+		}
+
+		if(!janus_sip_call_is_established(session)) {
+			JANUS_LOG(LOG_ERR, "TEST: call session not established...\n");
+			return;
+		}
+		
 		gboolean video = packet->video;
 		char *buf = packet->buffer;
 		uint16_t len = packet->length;
@@ -2523,8 +2786,24 @@ void janus_sip_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *pa
 			JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 			return;
 		}
+
+		if (session->connection_type == janus_session_connection_listener) {
+			janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
+			if (leg_thread) {
+				session = leg_thread->session;
+				if (session == NULL) {
+					JANUS_LOG(LOG_INFO, "ERROR: session is NULL in Listener incoming RTCP...\n");
+					return;
+				}
+			}
+		} else if (session->connection_type == janus_session_connection_initiator) {
+			//JANUS_LOG(LOG_INFO, "TEST: drop incoming RTP...\n");										
+			return;
+		}
+
 		if(!janus_sip_call_is_established(session))
 			return;
+
 		gboolean video = packet->video;
 		char *buf = packet->buffer;
 		uint16_t len = packet->length;
@@ -2593,6 +2872,53 @@ void janus_sip_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *pa
 	}
 }
 
+static int janus_sip_call_join(janus_sip_conf_leg_thread_t *janus_sip_conf_leg_thread, janus_session_connection_type connection_type) {
+	janus_sip_conf_leg_thread->connection_type = connection_type;
+	g_atomic_int_set(&janus_sip_conf_leg_thread->conference_ended, FALSE);
+	g_atomic_int_set(&janus_sip_conf_leg_thread->handle_detached, FALSE);
+	g_atomic_int_set(&janus_sip_conf_leg_thread->session_destroyed, FALSE);
+
+	if (connection_type == janus_session_connection_initiator) {
+		GError *error = NULL;
+		char tname[32];
+		g_snprintf(tname, sizeof(tname), "conf-initiator %s", janus_sip_conf_leg_thread->session->account.username);
+		//TODO: janus_refcount_increase(&janus_sip_conf_leg_thread->ref);
+
+		janus_sip_conf_leg_thread->leg_thread = g_thread_try_new(tname, janus_conf_thread, janus_sip_conf_leg_thread, &error);
+		if(error != NULL) {
+			janus_sip_conf_leg_thread->leg_thread = NULL;
+			//TODO: janus_refcount_decrease(&janus_sip_conf_leg_thread->ref);
+			JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the conf_initiator_thread thread...\n",
+				error->code, error->message ? error->message : "??");
+			janus_conference_cleanup(janus_sip_conf_leg_thread);
+			g_error_free(error);
+			return -1;
+		}
+	} else {
+		GError *error = NULL;
+		char tname[32];
+		g_snprintf(tname, sizeof(tname), "conf-listener %s", janus_sip_conf_leg_thread->session->account.username);
+		//TODO: janus_refcount_increase(&janus_sip_conf_leg_thread->ref);
+		janus_sip_conf_leg_thread->session->leg_thread = (void *)janus_sip_conf_leg_thread;
+		janus_sip_conf_leg_thread->leg_thread = g_thread_try_new(tname, janus_conf_thread, janus_sip_conf_leg_thread, &error);
+		if(error != NULL) {
+			janus_sip_conf_leg_thread->leg_thread = NULL;
+			//TODO: janus_refcount_decrease(&janus_sip_conf_leg_thread->ref);
+			JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the conf_peer_thread thread...\n",
+				error->code, error->message ? error->message : "??");
+			janus_conference_cleanup(janus_sip_conf_leg_thread);
+			g_error_free(error);
+			return -1;
+		}
+	}
+	return 0;
+}
+
+static void janus_conference_cleanup(janus_sip_conf_leg_thread_t *leg_thread) {
+	g_free(leg_thread->instance_ip);
+	g_free(leg_thread);
+	leg_thread = NULL;
+}
 static void janus_sip_recorder_close(janus_sip_session *session,
 		gboolean stop_audio, gboolean stop_audio_peer, gboolean stop_video, gboolean stop_video_peer) {
 	if(session->arc && stop_audio) {
@@ -2665,7 +2991,8 @@ static void janus_sip_hangup_media_internal(janus_plugin_session *handle) {
 	}
 	/* Involve SIP if needed */
 	janus_mutex_lock(&session->mutex);
-	if(session->stack->s_nh_i != NULL && session->callee != NULL) {
+	JANUS_LOG(LOG_INFO, "TEST: janus_sip_hangup_media_internal\n");
+	if(session->stack != NULL && session->stack->s_nh_i != NULL && session->callee != NULL) {
 		g_free(session->callee);
 		session->callee = NULL;
 		janus_mutex_unlock(&session->mutex);
@@ -2695,6 +3022,7 @@ static void janus_sip_hangup_media_internal(janus_plugin_session *handle) {
 		JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
 		json_decref(event);
 	} else {
+		JANUS_LOG(LOG_INFO, "TEST2: stack already destroyed\n");
 		janus_mutex_unlock(&session->mutex);
 	}
 	g_atomic_int_set(&session->establishing, 0);
@@ -2706,6 +3034,7 @@ static void janus_sip_hangup_media_internal(janus_plugin_session *handle) {
 static void *janus_sip_handler(void *data) {
 	JANUS_LOG(LOG_VERB, "Joining SIP handler thread\n");
 	janus_sip_message *msg = NULL;
+	gint64 room_id = 0;
 	int error_code = 0;
 	char error_cause[512];
 	json_t *root = NULL;
@@ -2733,6 +3062,7 @@ static void *janus_sip_handler(void *data) {
 		janus_mutex_unlock(&sessions_mutex);
 		/* Handle request */
 		error_code = 0;
+		room_id = 0;
 		root = msg->message;
 		if(msg->message == NULL) {
 			JANUS_LOG(LOG_ERR, "No message??\n");
@@ -3588,6 +3918,9 @@ static void *janus_sip_handler(void *data) {
 			if(!session->helper) {
 				janus_mutex_lock(&session->stack->smutex);
 				if(session->stack->s_nua == NULL) {
+					g_free(sdp);
+					session->sdp = NULL;
+					janus_sdp_destroy(parsed_sdp);
 					janus_mutex_unlock(&session->stack->smutex);
 					JANUS_LOG(LOG_ERR, "NUA destroyed while calling?\n");
 					error_code = JANUS_SIP_ERROR_LIBSOFIA_ERROR;
@@ -4411,6 +4744,10 @@ static void *janus_sip_handler(void *data) {
 			result = json_object();
 			json_object_set_new(result, "event", json_string(hold ? "holding" : "resuming"));
 		} else if(!strcasecmp(request_text, "hangup")) {
+			if (session->leg_thread) {
+				janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
+				g_atomic_int_set(&leg_thread->conference_ended, TRUE);
+			}
 			/* Hangup an ongoing call */
 			if(!janus_sip_call_is_established(session) && session->status != janus_sip_call_status_inviting) {
 				JANUS_LOG(LOG_ERR, "Wrong state (not established/inviting? status=%s)\n",
@@ -4875,6 +5212,74 @@ static void *janus_sip_handler(void *data) {
 			/* Notify the result */
 			result = json_object();
 			json_object_set_new(result, "event", json_string("reset"));
+		} else if(!strcasecmp(request_text, "conference")) {
+			JANUS_VALIDATE_JSON_OBJECT(root, conference_parameters,
+				error_code, error_cause, TRUE,
+				JANUS_SIP_ERROR_MISSING_ELEMENT, JANUS_SIP_ERROR_INVALID_ELEMENT);
+			if(error_code != 0) {
+				goto error;
+			}
+			janus_sip_conf_leg_thread_t *janus_sip_conf_leg_thread = (janus_sip_conf_leg_thread_t *)g_malloc(sizeof(janus_sip_conf_leg_thread_t));
+
+			memset(janus_sip_conf_leg_thread->call_leg_type, 0, sizeof(janus_sip_conf_leg_thread->call_leg_type));
+			strcpy(janus_sip_conf_leg_thread->call_leg_type, (char *)json_string_value(json_object_get(root, "call_leg_type")));
+
+			janus_sip_conf_leg_thread->session = session;
+			janus_sip_conf_leg_thread->room_id= json_integer_value(json_object_get(root, "room"));
+			janus_sip_conf_leg_thread->instance_ip = g_strdup((char *)json_string_value(json_object_get(root, "instance_ip")));
+			janus_sip_conf_leg_thread->instance_port = json_integer_value(json_object_get(root, "instance_port"));
+			janus_sip_conf_leg_thread->session_id = 0;
+			janus_sip_conf_leg_thread->handle_id = 0;
+			janus_sip_conf_leg_thread->sip_session_id = 0;
+			janus_sip_conf_leg_thread->sip_handle_id = 0;
+			janus_sip_conf_leg_thread->participant_id = 0;
+			if (session->conf_transaction) {
+				g_free(session->conf_transaction);
+				session->conf_transaction = NULL;
+			}
+			session->conf_transaction = msg->transaction ? g_strdup(msg->transaction) : NULL;
+
+			if (!strcasecmp(janus_sip_conf_leg_thread->call_leg_type, "listener")) {				
+				if (janus_sip_call_join(janus_sip_conf_leg_thread, janus_session_connection_listener) == -1) {
+					//TODO: change error code
+					g_free(janus_sip_conf_leg_thread->instance_ip);
+					g_free(janus_sip_conf_leg_thread);
+					error_code = JANUS_SIP_ERROR_WRONG_STATE;
+					g_snprintf(error_cause, 512, "Wrong state");
+					g_free(session->conf_transaction);
+					session->conf_transaction = NULL;
+					goto error;
+				}
+				/* Notify the result */
+				result = json_object();				
+				json_object_set_new(result, "event", json_string("listening"));
+			} else {
+				g_free(janus_sip_conf_leg_thread->instance_ip);
+				g_free(janus_sip_conf_leg_thread);
+				g_free(session->conf_transaction);
+				session->conf_transaction = NULL;
+				JANUS_LOG(LOG_ERR, "Unknown call leg type (%s)\n", janus_sip_conf_leg_thread->call_leg_type);
+				error_code = JANUS_SIP_ERROR_INVALID_REQUEST;
+				g_snprintf(error_cause, 512, "Unknown call leg type (%s)", janus_sip_conf_leg_thread->call_leg_type);
+				goto error;
+			}
+			
+		} else if(!strcasecmp(request_text, "split")) {
+			if (session->leg_thread) {
+				JANUS_LOG(LOG_INFO, "TEST: Splitting call leg type \n");
+				janus_sip_conf_leg_thread_t *conf_leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
+				room_id = conf_leg_thread->room_id;
+				g_atomic_int_set(&conf_leg_thread->conference_ended, TRUE);
+			}
+
+			if(session->conf_transaction) {
+				g_free(session->conf_transaction);
+				session->conf_transaction = NULL;
+			}
+			session->conf_transaction = msg->transaction ? g_strdup(msg->transaction) : NULL;
+			/* Notify the result */
+			result = json_object();				
+			json_object_set_new(result, "event", json_string("splitting"));
 		} else {
 			JANUS_LOG(LOG_ERR, "Unknown request (%s)\n", request_text);
 			error_code = JANUS_SIP_ERROR_INVALID_REQUEST;
@@ -4890,6 +5295,9 @@ done:
 			if(result != NULL)
 				json_object_set_new(event, "result", result);
 			json_object_set_new(event, "call_id", json_string(session->callid));
+			if (room_id)
+				json_object_set_new(result, "room", json_integer(room_id));					
+
 			int ret = gateway->push_event(msg->handle, &janus_sip_plugin, msg->transaction, event, NULL);
 			JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
 			json_decref(event);
@@ -4991,6 +5399,11 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				session->media.autoaccept_reinvites = TRUE;
 				session->media.ready = FALSE;
 				session->media.on_hold = FALSE;
+				if (session->leg_thread) {
+					janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
+					g_atomic_int_set(&leg_thread->conference_ended, TRUE);
+				}
+
 				janus_sip_call_update_status(session, janus_sip_call_status_idle);
 				session->stack->s_nh_i = NULL;
 				json_t *call = json_object();
@@ -5477,8 +5890,15 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 
 			/* Notify the application about the new incoming call or re-INVITE */
 			json_t *jsep = NULL;
-			if(sdp)
+			if(sdp) {
 				jsep = json_pack("{ssss}", "type", "offer", "sdp", sip->sip_payload->pl_data);
+
+				if (session->sip_pl_data) {
+					g_free(session->sip_pl_data);
+					session->sip_pl_data = NULL;
+				}
+				session->sip_pl_data = g_strdup(sip->sip_payload->pl_data);
+			}
 			json_t *call = json_object();
 			json_object_set_new(call, "sip", json_string("event"));
 			json_t *calling = json_object();
@@ -6134,6 +6554,10 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			json_t *jsep = NULL;
 			if(!session->media.earlymedia) {
 				jsep = json_pack("{ssss}", "type", "answer", "sdp", fixed_sdp);
+				if(session->sip_pl_data) {
+					g_free(session->sip_pl_data);
+				}
+				session->sip_pl_data = g_strdup(sip->sip_payload->pl_data);
 			} else {
 				/* We've received the 200 OK after the 183, we can remove the flag now */
 				session->media.earlymedia = FALSE;
@@ -6726,6 +7150,104 @@ char *janus_sip_sdp_manipulate(janus_sip_session *session, janus_sdp *sdp, gbool
 	return janus_sdp_write(sdp);
 }
 
+// static int janus_sip_allocate_local_ports_for_conference(janus_sip_session *session, gboolean update) {
+// 	if(session == NULL) {
+// 		JANUS_LOG(LOG_ERR, "Invalid session for conference\n");
+// 		return -1;
+// 	}
+	
+// 	if(!update) {
+// 		/* Reset status */
+// 		if(session->media.conf_audio_rtp_fd != -1) {
+// 			close(session->media.conf_audio_rtp_fd);
+// 			session->media.conf_audio_rtp_fd = -1;
+// 		}
+		
+// 		session->media.local_conf_audio_rtp_port = 0;
+		
+// 		//session->media.audio_ssrc = 0;
+		
+// 		if(session->media.confPipefd[0] > 0) {
+// 			close(session->media.confPipefd[0]);
+// 			session->media.confPipefd[0] = -1;
+// 		}
+// 		if(session->media.confPipefd[1] > 0) {
+// 			close(session->media.confPipefd[1]);
+// 			session->media.confPipefd[1] = -1;
+// 		}
+// 	}
+
+// 	gboolean use_ipv6_address_family = !ipv6_disabled &&
+// 		(janus_network_address_is_null(&janus_network_local_media_ip) || janus_network_local_media_ip.family == AF_INET6);
+// 	socklen_t addrlen = use_ipv6_address_family? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+// 	/* Start */
+// 	int attempts = 100;	/* FIXME Don't retry forever */
+// 	if(session->media.has_audio) {
+// 		JANUS_LOG(LOG_VERB, "Allocating conference audio ports using address [%s]\n",
+// 			janus_network_address_is_null(&janus_network_local_media_ip) ? "any" : local_media_ip);
+// 		struct sockaddr_storage audio_rtp_address;
+// 		while(session->media.local_conf_audio_rtp_port == 0) {
+// 			if(attempts == 0)	/* Too many failures */
+// 				return -1;
+// 			memset(&audio_rtp_address, 0, sizeof(audio_rtp_address));
+// 			if(session->media.conf_audio_rtp_fd == -1) {
+// 				session->media.conf_audio_rtp_fd = socket(use_ipv6_address_family ? AF_INET6 : AF_INET, SOCK_DGRAM, 0);
+// 				int v6only = 0;
+// 				if(use_ipv6_address_family && session->media.conf_audio_rtp_fd != -1 &&
+// 						setsockopt(session->media.conf_audio_rtp_fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only)) != 0) {
+// 					JANUS_LOG(LOG_WARN, "Error setting v6only to false on conference audio RTP socket (error=%s)\n",
+// 						g_strerror(errno));
+// 				}
+// 				/* Set the DSCP value if set in the config file */
+// 				if(session->media.conf_audio_rtp_fd != -1 && dscp_audio_rtp > 0) {
+// 					int optval = dscp_audio_rtp << 2;
+// 					int ret = setsockopt(session->media.conf_audio_rtp_fd, IPPROTO_IP, IP_TOS, &optval, sizeof(optval));
+// 					if(ret < 0) {
+// 						JANUS_LOG(LOG_WARN, "Error setting IP_TOS %d on conference audio RTP socket (error=%s)\n",
+// 							optval, g_strerror(errno));
+// 					}
+// 				}
+// 			}
+// 			if(session->media.conf_audio_rtp_fd == -1) {
+// 				JANUS_LOG(LOG_ERR, "Error creating conference audio sockets...\n");
+// 				return -1;
+// 			}
+// 			int rtp_port = g_random_int_range(rtp_range_min, rtp_range_max);
+// 			if(rtp_port % 2)
+// 				rtp_port++;	/* Pick an even port for RTP */
+// 			if(use_ipv6_address_family) {
+// 				struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&audio_rtp_address;
+// 				addr->sin6_family = AF_INET6;
+// 				addr->sin6_port = htons(rtp_port);
+// 				addr->sin6_addr = janus_network_address_is_null(&janus_network_local_media_ip) ? in6addr_any : janus_network_local_media_ip.ipv6;
+// 			} else {
+// 				struct sockaddr_in *addr = (struct sockaddr_in *)&audio_rtp_address;
+// 				addr->sin_family = AF_INET;
+// 				addr->sin_port = htons(rtp_port);
+// 				addr->sin_addr.s_addr = janus_network_address_is_null(&janus_network_local_media_ip) ? INADDR_ANY : janus_network_local_media_ip.ipv4.s_addr;
+// 			}
+// 			if(bind(session->media.conf_audio_rtp_fd, (struct sockaddr *)(&audio_rtp_address), addrlen) < 0) {
+// 				JANUS_LOG(LOG_ERR, "Bind failed for conference audio RTP (port %d), error (%s), trying a different one...\n", rtp_port, g_strerror(errno));
+// 				close(session->media.conf_audio_rtp_fd);
+// 				session->media.conf_audio_rtp_fd = -1;
+// 				attempts--;
+// 				continue;
+// 			}
+// 			JANUS_LOG(LOG_VERB, "Conference Audio RTP listener bound to [%s]:%d(%d)\n",
+// 				janus_network_address_is_null(&janus_network_local_media_ip) ? "any" : local_media_ip, rtp_port, session->media.conf_audio_rtp_fd);
+// 			session->media.local_conf_audio_rtp_port = rtp_port;
+// 		}
+// 	}
+// 	// if(session->media.has_video) {
+// 	// TODO: handle video
+// 	// }
+// 	if(!update) {
+// 		/* We need this to quickly interrupt the poll when it's time to update a session or wrap up */
+// 		pipe(session->media.confPipefd);
+// 	}
+// 	return 0;
+// }
+
  /* Bind local RTP/RTCP sockets */
 static int janus_sip_allocate_local_ports(janus_sip_session *session, gboolean update) {
 	if(session == NULL) {
@@ -6889,6 +7411,21 @@ static int janus_sip_allocate_local_ports(janus_sip_session *session, gboolean u
 	}
 	return 0;
 }
+
+/* Helper method to (re)connect RTP/RTCP sockets */
+// static void janus_sip_connect_conf_sockets(janus_sip_session *session, struct sockaddr_in *audio_server_addr) {
+// 	if(!session || (!audio_server_addr))
+// 		return;
+
+// 	/* Connect peers (FIXME This pretty much sucks right now) */
+// 	if(session->media.remote_conf_audio_rtp_port && audio_server_addr && session->media.conf_audio_rtp_fd != -1) {
+// 		audio_server_addr->sin_port = htons(session->media.remote_conf_audio_rtp_port);
+// 		if(connect(session->media.conf_audio_rtp_fd, (struct sockaddr *)audio_server_addr, sizeof(struct sockaddr)) == -1) {
+// 			JANUS_LOG(LOG_ERR, "[SIP-%s] Couldn't connect conference audio RTP? (%s:%d)\n", session->account.username, session->media.remote_conf_audio_ip, session->media.remote_conf_audio_rtp_port);
+// 			JANUS_LOG(LOG_ERR, "[SIP-%s]   -- %d (%s)\n", session->account.username, errno, g_strerror(errno));
+// 		}
+// 	}
+// }
 
 /* Helper method to (re)connect RTP/RTCP sockets */
 static void janus_sip_connect_sockets(janus_sip_session *session, struct sockaddr_in *audio_server_addr, struct sockaddr_in *video_server_addr) {
@@ -7228,7 +7765,18 @@ static void *janus_sip_relay_thread(void *data) {
 							rtp.extensions.audio_level_vad = vad;
 						}
 					}
-					gateway->relay_rtp(session->handle, &rtp);
+
+					if (session->leg_thread) {
+						janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
+						if (session->connection_type == janus_session_connection_initiator) {
+							//JANUS_LOG(LOG_INFO, "[SIP-%s] Relaying audio RTP packet to %s:%d\n", session->account.username, leg_thread->instance_ip, leg_thread->instance_port);
+							gateway->relay_rtp(leg_thread->plugin_session, &rtp);
+						} else {
+							gateway->relay_rtp(session->handle, &rtp);	
+						}
+					} else {
+						gateway->relay_rtp(session->handle, &rtp);
+					}
 					continue;
 				} else if(session->media.audio_rtcp_fd != -1 && fds[i].fd == session->media.audio_rtcp_fd) {
 					/* Got something audio (RTCP) */
@@ -7252,7 +7800,18 @@ static void *janus_sip_relay_thread(void *data) {
 					}
 					/* Relay to application */
 					janus_plugin_rtcp rtcp = { .video = FALSE, .buffer = buffer, bytes };
-					gateway->relay_rtcp(session->handle, &rtcp);
+					
+					
+					if (session->leg_thread) {
+						janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
+						if (session->connection_type == janus_session_connection_initiator) {
+							gateway->relay_rtcp(leg_thread->plugin_session, &rtcp);
+						} else {
+							gateway->relay_rtcp(session->handle, &rtcp);
+						}
+					} else {
+						gateway->relay_rtcp(session->handle, &rtcp);
+					}
 					continue;
 				} else if(session->media.video_rtp_fd != -1 && fds[i].fd == session->media.video_rtp_fd) {
 					/* Got something video (RTP) */
@@ -7305,7 +7864,19 @@ static void *janus_sip_relay_thread(void *data) {
 							rtp.extensions.video_flipped = f;
 						}
 					}
-					gateway->relay_rtp(session->handle, &rtp);
+					
+
+					
+					if (session->leg_thread) {
+						janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
+						if (session->connection_type == janus_session_connection_initiator) {
+							gateway->relay_rtp(leg_thread->plugin_session, &rtp);
+						} else {
+							gateway->relay_rtp(session->handle, &rtp);
+						}
+					} else {
+						gateway->relay_rtp(session->handle, &rtp);
+					}
 					continue;
 				} else if(session->media.video_rtcp_fd != -1 && fds[i].fd == session->media.video_rtcp_fd) {
 					/* Got something video (RTCP) */
@@ -7329,7 +7900,17 @@ static void *janus_sip_relay_thread(void *data) {
 					}
 					/* Relay to application */
 					janus_plugin_rtcp rtcp = { .video = TRUE, .buffer = buffer, bytes };
-					gateway->relay_rtcp(session->handle, &rtcp);
+					
+					if (session->leg_thread) {
+						janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
+						if (session->connection_type == janus_session_connection_initiator) {
+							gateway->relay_rtcp(leg_thread->plugin_session, &rtcp);
+						} else {
+							gateway->relay_rtcp(session->handle, &rtcp);
+						}
+					} else {
+						gateway->relay_rtcp(session->handle, &rtcp);
+					}
 					continue;
 				}
 			}
@@ -7436,3 +8017,378 @@ gpointer janus_sip_sofia_thread(gpointer user_data) {
 	g_thread_unref(g_thread_self());
 	return NULL;
 }
+
+
+static void create_session(janus_sip_conf_leg_thread_t *leg_thread) {
+	//{"janus": "create", "transaction": "8W8ktgojUXWr"}
+	json_t *root = json_object();
+	json_object_set_new(root, "janus", json_string("create"));
+	
+	char *transaction_string = janus_random_uuid();
+	json_object_set_new(root, "transaction", json_string(transaction_string));
+	g_free(transaction_string);
+	conf_gateway->send_request((void *)leg_thread->ws_data, root);
+	json_decref(root);
+}
+
+
+static void send_success_event(janus_sip_session *session, gint64 room_id, const char *event_name) {
+	if (!session) {
+		JANUS_LOG(LOG_ERR, "No session\n");
+		goto done;
+	}
+	json_t *result = json_object();
+	json_object_set_new(result, "event", json_string(event_name));
+	/* Prepare JSON event */
+	json_t *event = json_object();
+	json_object_set_new(event, "sip", json_string("event"));
+	json_object_set_new(event, "call_id", json_string(session->callid));
+	json_object_set_new(result, "room", json_integer(room_id));					
+	if(result != NULL)
+		json_object_set_new(event, "result", result);
+	int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->conf_transaction, event, NULL);
+	JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
+	json_decref(event);
+
+done:
+	if (session->conf_transaction) {
+		g_free(session->conf_transaction);
+		session->conf_transaction = NULL;
+	}
+	return;;
+}
+
+static void send_error_event(janus_sip_session *session, gint64 room_id, int error_code, const char *error_cause) {
+	if (!session) {
+		JANUS_LOG(LOG_ERR, "No session\n");
+		goto done;
+	}
+	/* Prepare JSON error event */
+	json_t *event = json_object();
+	json_object_set_new(event, "sip", json_string("event"));
+	json_object_set_new(event, "error_code", json_integer(error_code));
+	json_object_set_new(event, "error", json_string(error_cause));
+	json_object_set_new(event, "call_id", json_string(session->callid));
+	int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->conf_transaction, event, NULL);
+	JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
+	json_decref(event);
+
+done:
+	if (session->conf_transaction) {
+		g_free(session->conf_transaction);
+		session->conf_transaction = NULL;
+	}
+	return;
+}
+
+static void keepalive_session(janus_sip_conf_leg_thread_t *leg_thread) {
+	//{"janus":"attach","plugin":"janus.plugin.audiobridge", "transaction":"4xU45CLacjZJ","session_id":840449148756454}
+	json_t *root = json_object();
+	json_object_set_new(root, "janus", json_string("keepalive"));
+	
+	char *transaction_string = janus_random_uuid();
+	json_object_set_new(root, "transaction", json_string(transaction_string));
+	json_object_set_new(root, "session_id", json_integer(leg_thread->session_id));
+	g_free(transaction_string);
+	conf_gateway->send_request((void *)leg_thread->ws_data, root);
+	json_decref(root);
+}
+
+static void attach_handle(janus_sip_conf_leg_thread_t *leg_thread) {
+	//{"janus":"attach","plugin":"janus.plugin.audiobridge", "transaction":"4xU45CLacjZJ","session_id":840449148756454}
+	json_t *root = json_object();
+	json_object_set_new(root, "janus", json_string("attach"));
+	
+	char *transaction_string = janus_random_uuid();
+	json_object_set_new(root, "transaction", json_string(transaction_string));
+	json_object_set_new(root, "plugin", json_string("janus.plugin.audiobridge"));
+	json_object_set_new(root, "session_id", json_integer(leg_thread->session_id));
+	g_free(transaction_string);
+	conf_gateway->send_request((void *)leg_thread->ws_data, root);
+	json_decref(root);
+}
+
+static void detach_handle(janus_sip_conf_leg_thread_t *leg_thread) {
+	//{"janus":"attach","plugin":"janus.plugin.audiobridge", "transaction":"4xU45CLacjZJ","session_id":840449148756454}
+	json_t *root = json_object();
+	json_object_set_new(root, "janus", json_string("detach"));
+	
+	char *transaction_string = janus_random_uuid();
+	json_object_set_new(root, "transaction", json_string(transaction_string));
+	json_object_set_new(root, "handle_id", json_integer(leg_thread->handle_id));
+	json_object_set_new(root, "session_id", json_integer(leg_thread->session_id));
+	g_free(transaction_string);
+	conf_gateway->send_request((void *)leg_thread->ws_data, root);
+	json_decref(root);
+}
+
+static void destroy_session(janus_sip_conf_leg_thread_t *leg_thread) {
+	//{"janus":"attach","plugin":"janus.plugin.audiobridge", "transaction":"4xU45CLacjZJ","session_id":840449148756454}
+	json_t *root = json_object();
+	json_object_set_new(root, "janus", json_string("destroy"));
+	
+	char *transaction_string = janus_random_uuid();
+	json_object_set_new(root, "transaction", json_string(transaction_string));
+	json_object_set_new(root, "session_id", json_integer(leg_thread->session_id));
+	g_free(transaction_string);
+	conf_gateway->send_request((void *)leg_thread->ws_data, root);
+	json_decref(root);
+}
+
+static void join_audiobridge(janus_sip_conf_leg_thread_t *leg_thread) {
+	//{"janus":"message","body":{"request":"join","room":1234, “id”:4962205215599668, "display":"test2"},"transaction":"S3UtoCOC7x3e","session_id":840449148756454,"handle_id":4430042885387977}
+	json_t *root = json_object();
+	json_object_set_new(root, "janus", json_string("message"));
+	
+	json_t *body = json_object();
+	json_object_set_new(body, "request", json_string("join"));
+	json_object_set_new(body, "room", json_integer(leg_thread->room_id));
+	json_object_set_new(body, "display", json_string("conference"));
+	if (leg_thread->session->media.audio_pt_name)
+		json_object_set_new(body, "codec", json_string(leg_thread->session->media.audio_pt_name));
+	json_object_set_new(body, "muted", json_false());
+	json_object_set_new(root, "body", body);
+
+	char *transaction_string = janus_random_uuid();
+	json_object_set_new(root, "transaction", json_string(transaction_string));
+	json_object_set_new(root, "handle_id", json_integer(leg_thread->handle_id));
+	json_object_set_new(root, "session_id", json_integer(leg_thread->session_id));
+	g_free(transaction_string);
+	conf_gateway->send_request((void *)leg_thread->ws_data, root);
+	json_decref(root);
+}
+
+static void configure_audiobridge(janus_sip_conf_leg_thread_t *leg_thread) {
+	//{"janus":"message","body":{"request":"configure","muted":false},"transaction":"FthPKLKWYDJy","jsep":{"type":"offer","sdp":""},"session_id":840449148756454,"handle_id":4430042885387977}	
+	JANUS_LOG(LOG_INFO, "[%p] configure_audiobridge: IN\n", leg_thread);
+	json_t *root = json_object();
+	json_object_set_new(root, "janus", json_string("message"));
+	
+	json_t *body = json_object();
+	json_object_set_new(body, "request", json_string("configure"));
+	json_object_set_new(body, "muted", json_false());
+	json_object_set_new(root, "body", body);
+
+	char *transaction_string = janus_random_uuid();
+	json_object_set_new(root, "transaction", json_string(transaction_string));
+	json_object_set_new(root, "handle_id", json_integer(leg_thread->handle_id));
+	json_object_set_new(root, "session_id", json_integer(leg_thread->session_id));
+
+	json_t *jsep = NULL;
+	
+	if(leg_thread->session->sip_pl_data) {
+		jsep = json_pack("{ssss}", "type", "offer", "sdp", leg_thread->session->sip_pl_data);
+	}
+	conf_gateway->send_request_with_jsep((void *)leg_thread->ws_data, root, leg_thread->plugin_session, jsep);
+	g_free(transaction_string);
+	if(jsep)
+		json_decref(jsep);
+	json_decref(root);
+	JANUS_LOG(LOG_INFO, "[%p] configure_audiobridge: Exit\n", leg_thread);
+}
+
+static void leave_audiobridge(janus_sip_conf_leg_thread_t *leg_thread) {
+	//{"janus":"message","body":{"request":"join","room":1234, “id”:4962205215599668, "display":"test2"},"transaction":"S3UtoCOC7x3e","session_id":840449148756454,"handle_id":4430042885387977}
+	json_t *root = json_object();
+	json_object_set_new(root, "janus", json_string("message"));
+	
+	json_t *body = json_object();
+	json_object_set_new(body, "request", json_string("leave"));
+	json_object_set_new(root, "body", body);
+
+	char *transaction_string = janus_random_uuid();
+	json_object_set_new(root, "transaction", json_string(transaction_string));
+	json_object_set_new(root, "handle_id", json_integer(leg_thread->handle_id));
+	json_object_set_new(root, "session_id", json_integer(leg_thread->session_id));
+	g_free(transaction_string);
+	conf_gateway->send_request((void *)leg_thread->ws_data, root);
+	json_decref(root);
+}
+
+static void clear_media_params(janus_sip_session *session) {
+	session->account.identity = NULL;
+	session->account.force_udp = FALSE;
+	session->account.force_tcp = FALSE;
+	session->account.sips = FALSE;
+	session->account.rfc2543_cancel = FALSE;
+	session->account.username = NULL;
+	session->account.display_name = NULL;
+	session->account.user_agent = NULL;
+	session->account.authuser = NULL;
+	session->account.secret = NULL;
+	session->account.secret_type = janus_sip_secret_type_unknown;
+	session->account.sip_port = 0;
+	session->account.proxy = NULL;
+	session->account.outbound_proxy = NULL;
+	session->account.registration_status = janus_sip_registration_status_unregistered;
+	session->media.remote_audio_ip = NULL;
+	session->media.remote_video_ip = NULL;
+	session->media.earlymedia = FALSE;
+	session->media.update = FALSE;
+	session->media.autoaccept_reinvites = TRUE;
+	session->media.ready = FALSE;
+	session->media.require_srtp = FALSE;
+	session->media.has_srtp_local_audio = FALSE;
+	session->media.has_srtp_local_video = FALSE;
+	session->media.has_srtp_remote_audio = FALSE;
+	session->media.has_srtp_remote_video = FALSE;
+	session->media.srtp_profile = 0;
+	session->media.audio_srtp_local_profile = NULL;
+	session->media.audio_srtp_local_crypto = NULL;
+	session->media.video_srtp_local_profile = NULL;
+	session->media.video_srtp_local_crypto = NULL;
+	session->media.on_hold = FALSE;
+	session->media.has_audio = FALSE;
+	session->media.audio_rtp_fd = -1;
+	session->media.audio_rtcp_fd= -1;
+	session->media.local_audio_rtp_port = 0;
+	session->media.remote_audio_rtp_port = 0;
+	session->media.local_audio_rtcp_port = 0;
+	session->media.remote_audio_rtcp_port = 0;
+	session->media.audio_ssrc = 0;
+	session->media.audio_ssrc_peer = 0;
+	session->media.audio_pt = -1;
+	session->media.opusred_pt = -1;
+	session->media.audio_pt_name = NULL;
+	session->media.audio_send = TRUE;
+	session->media.pre_hold_audio_dir = JANUS_SDP_DEFAULT;
+	session->media.has_video = FALSE;
+	session->media.video_rtp_fd = -1;
+	session->media.video_rtcp_fd= -1;
+	session->media.local_video_rtp_port = 0;
+	session->media.remote_video_rtp_port = 0;
+	session->media.local_video_rtcp_port = 0;
+	session->media.remote_video_rtcp_port = 0;
+	session->media.video_ssrc = 0;
+	session->media.video_ssrc_peer = 0;
+	session->media.simulcast_ssrc = 0;
+	session->media.video_pt = -1;
+	session->media.video_pt_name = NULL;
+	session->media.video_send = TRUE;
+	session->media.pre_hold_video_dir = JANUS_SDP_DEFAULT;
+	session->media.video_orientation_extension_id = -1;
+	session->media.audio_level_extension_id = -1;
+	/* Initialize the RTP context */
+	janus_rtp_switching_context_reset(&session->media.context);
+	session->media.pipefd[0] = -1;
+	session->media.pipefd[1] = -1;
+	session->media.updated = FALSE;
+	session->media.audio_remote_policy.ssrc.type = ssrc_any_inbound;
+	session->media.audio_local_policy.ssrc.type = ssrc_any_inbound;
+	session->media.video_remote_policy.ssrc.type = ssrc_any_inbound;
+	session->media.video_local_policy.ssrc.type = ssrc_any_inbound;
+}
+static void *janus_conf_thread(void *data) {
+	janus_sip_conf_leg_thread_t *janus_sip_conf_leg_thread = (janus_sip_conf_leg_thread_t *)data;
+	char error_cause[128] = {0};
+	int error_code = 0;
+	
+
+	gint64 target_time = g_get_real_time();;
+	if(!janus_sip_conf_leg_thread) {
+		error_code = JANUS_SIP_ERROR_UNKNOWN_CONFERENCE_ERROR;
+		g_snprintf(error_cause, 128, "Unknown conference error");
+		goto done;
+	}
+	janus_mutex_init(&janus_sip_conf_leg_thread->mutex);
+
+	JANUS_LOG(LOG_VERB, "Starting conference thread\n");
+	janus_sip_conf_leg_thread->plugin_session = (janus_plugin_session *)conf_gateway->create_new_session();
+
+	if (janus_sip_conf_leg_thread->plugin_session == NULL) {
+		error_code = JANUS_SIP_ERROR_UNKNOWN_CONFERENCE_ERROR;
+		g_snprintf(error_cause, 128, "Unknown conference error");
+		goto done;
+	}
+	
+	janus_sip_session *session = (janus_sip_session *)janus_sip_conf_leg_thread->plugin_session->plugin_handle;
+	janus_sip_conf_leg_thread->core_session = janus_sip_conf_leg_thread->plugin_session->core_session;
+	janus_sip_conf_leg_thread->ws_data = (void *)conf_gateway->conf_init(janus_sip_conf_leg_thread->instance_ip, janus_sip_conf_leg_thread->instance_port, janus_sip_conf_leg_thread);
+
+	if (janus_sip_conf_leg_thread->ws_data == NULL) {
+		conf_gateway->conf_clear_session(NULL, janus_sip_conf_leg_thread->core_session);
+		error_code = JANUS_SIP_ERROR_UNKNOWN_CONFERENCE_ERROR;
+		g_snprintf(error_cause, 128, "Unknown conference error");
+		goto done;
+	}
+	session->leg_thread = (void *)janus_sip_conf_leg_thread;
+	create_session(janus_sip_conf_leg_thread);
+	// janus_sip_conf_leg_thread->local_session_id = conf_gateway->get_session_id(janus_sip_conf_leg_thread->plugin_session);
+	// janus_sip_conf_leg_thread->local_handle_id = conf_gateway->get_handle_id(janus_sip_conf_leg_thread->plugin_session);
+	// janus_sip_conf_leg_thread->sip_session_id = conf_gateway->get_session_id(janus_sip_conf_leg_thread->session->handle);
+	// janus_sip_conf_leg_thread->sip_handle_id = conf_gateway->get_handle_id(janus_sip_conf_leg_thread->session->handle);
+
+	janus_sip_conf_leg_thread->request_inprogress = FALSE;
+	while(1) {
+		if (g_atomic_int_get(&janus_sip_conf_leg_thread->conference_ended)) {
+			if (!g_atomic_int_get(&janus_sip_conf_leg_thread->handle_detached)) {
+				if (!janus_sip_conf_leg_thread->request_inprogress) {
+					//it should cleanup within 5 seconds or it will be forcefully cleanup
+					
+					target_time = g_get_real_time() + (5 * G_USEC_PER_SEC);
+					JANUS_LOG(LOG_INFO, "conference thread: clearing conference setup\n");
+
+					session->connection_type = janus_session_connection_none;
+					janus_sip_conf_leg_thread->session->connection_type = janus_session_connection_none;
+					conf_gateway->conf_clear_handle(janus_sip_conf_leg_thread->plugin_session, janus_sip_conf_leg_thread->core_session, "hangup");
+
+					leave_audiobridge(janus_sip_conf_leg_thread);
+					detach_handle(janus_sip_conf_leg_thread);
+					janus_sip_conf_leg_thread->request_inprogress = TRUE;
+					janus_sip_conf_leg_thread->session->leg_thread = NULL;
+				}
+			} else {
+				janus_sip_conf_leg_thread->request_inprogress = FALSE;
+				JANUS_LOG(LOG_INFO, "TEST: conference thread: handle detached\n");
+				if (!janus_sip_conf_leg_thread->request_inprogress) {
+					JANUS_LOG(LOG_INFO, "TEST: conference thread: destroying session\n");
+					//it should cleanup within 5 seconds or it will be forcefully cleanup
+					target_time = g_get_real_time() + (5 * G_USEC_PER_SEC);
+					destroy_session(janus_sip_conf_leg_thread);
+					janus_sip_conf_leg_thread->request_inprogress = TRUE;
+				}
+			}
+
+			if (g_atomic_int_get(&janus_sip_conf_leg_thread->session_destroyed) && g_atomic_int_get(&janus_sip_conf_leg_thread->handle_detached)) {
+				JANUS_LOG(LOG_INFO, "TEST: conference thread: destroyed session and detached handle\n");
+				break;
+			}
+
+			gint64 now = g_get_real_time();
+		    if (now >= target_time) {
+				JANUS_LOG(LOG_WARN, "conference thread: ending with timeout\n");
+				break;
+			}
+		    g_usleep(10000); // Sleep for 10ms
+		}
+	}
+	JANUS_LOG(LOG_INFO, "TEST: conference thread: end loop\n");
+	conf_gateway->conf_clear_handle(janus_sip_conf_leg_thread->plugin_session, janus_sip_conf_leg_thread->core_session, "detach");
+	send_success_event(janus_sip_conf_leg_thread->session, janus_sip_conf_leg_thread->room_id, "splitted");
+	conf_gateway->conf_clear_session(janus_sip_conf_leg_thread->ws_data, janus_sip_conf_leg_thread->core_session);
+	janus_sip_conf_leg_thread->core_session = NULL;
+	JANUS_LOG(LOG_INFO, "TEST: conference thread: exit\n");
+
+done:
+	janus_sip_conf_leg_thread->session->leg_thread = NULL;
+	session->leg_thread = NULL;
+
+	if (error_code) {
+		send_error_event(janus_sip_conf_leg_thread->session, janus_sip_conf_leg_thread->room_id, error_code, error_cause);
+	}
+	//TODO: janus_refcount_decrease(&janus_sip_conf_leg_thread->ref);
+	janus_mutex_destroy(&janus_sip_conf_leg_thread->mutex);
+	janus_conference_cleanup(janus_sip_conf_leg_thread);
+	JANUS_LOG(LOG_VERB, "Leaving peer thread...\n");
+	g_thread_unref(g_thread_self());
+	return NULL;
+}
+
+// static void conf_thread_cleanup(janus_sip_conf_leg_thread_t *janus_sip_conf_leg_thread) {
+// 	// janus_conf_initiator(janus_sip_conf_leg_thread->session);
+// 	// janus_refcount_decrease(&janus_sip_conf_leg_thread->session->ref);
+// 	JANUS_LOG(LOG_VERB, "Leaving initiator thread...\n");
+// 	janus_refcount_decrease(&janus_sip_conf_leg_thread->ref);
+// 	janus_conference_cleanup(janus_sip_conf_leg_thread);
+// 	g_thread_unref(g_thread_self());
+// }

@@ -196,6 +196,8 @@ AC_ARG_ENABLE([all-transports],
                      [enable_rest=no])
                AS_IF([test "x$enable_websockets" != "xyes"],
                      [enable_websockets=no])
+               AS_IF([test "x$enable_wsclient" != "xyes"],
+                     [enable_wsclient=no])
                AS_IF([test "x$enable_rabbitmq" != "xyes"],
                      [enable_rabbitmq=no])
                AS_IF([test "x$enable_mqtt" != "xyes"],
@@ -259,6 +261,13 @@ AC_ARG_ENABLE([websockets],
               [AS_IF([test "x$enable_websockets" != "xyes"],
                      [enable_websockets=no])],
               [enable_websockets=maybe])
+
+AC_ARG_ENABLE([wsclient],
+              [AS_HELP_STRING([--disable-wsclient],
+                              [Disable wsclient support])],
+              [AS_IF([test "x$enable_wsclient" != "xyes"],
+                     [enable_wsclient=no])],
+              [enable_wsclient=maybe])
 
 AC_ARG_ENABLE([rabbitmq],
               [AS_HELP_STRING([--disable-rabbitmq],
@@ -572,6 +581,16 @@ AC_CHECK_LIB([websockets],
 							   [AC_DEFINE(HAVE_LIBWEBSOCKETS_PEER_SIMPLE)]
 							  )
 			   ])
+                     AS_IF([test "x$enable_wsclient" != "xno"],
+			   [
+				  AC_DEFINE(HAVE_WEBSOCKETS)
+				  WS_MANUAL_LIBS="-lwebsockets"
+				  enable_wsclient=yes
+				  AC_CHECK_LIB([websockets],
+							   [lws_get_peer_simple],
+							   [AC_DEFINE(HAVE_LIBWEBSOCKETS_PEER_SIMPLE)]
+							  )
+			   ])
                AS_IF([test "x$enable_websockets_event_handler" != "xno"],
                [
                  AC_DEFINE(HAVE_WSEVH)
@@ -584,6 +603,7 @@ AC_CHECK_LIB([websockets],
 					 [AC_MSG_ERROR([libwebsockets not found. See README.md for installation instructions or use --disable-websockets])])
 			 ])
 AM_CONDITIONAL([ENABLE_WEBSOCKETS], [test "x$enable_websockets" = "xyes"])
+AM_CONDITIONAL([ENABLE_WSCLIENT], [test "x$enable_wsclient" = "xyes"])
 AM_CONDITIONAL([ENABLE_WSEVH], [test "x$enable_websockets_event_handler" = "xyes"])
 AC_SUBST(WS_MANUAL_LIBS)
 
@@ -1035,6 +1055,9 @@ AM_COND_IF([ENABLE_REST],
 AM_COND_IF([ENABLE_WEBSOCKETS],
 	[echo "    WebSockets:            yes"],
 	[echo "    WebSockets:            no"])
+AM_COND_IF([ENABLE_WSCLIENT],
+	[echo "    Wsclient:            yes"],
+	[echo "    Wsclient:            no"])
 AM_COND_IF([ENABLE_RABBITMQ],
 	[echo "    RabbitMQ:              yes"],
 	[echo "    RabbitMQ:              no"])

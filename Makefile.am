@@ -265,6 +265,14 @@ conf_DATA += conf/janus.transport.websockets.jcfg.sample
 EXTRA_DIST += conf/janus.transport.websockets.jcfg.sample
 endif
 
+if ENABLE_WSCLIENT
+transport_LTLIBRARIES += transports/libjanus_wsclient.la
+transports_libjanus_wsclient_la_SOURCES = transports/janus_wsclient.c
+transports_libjanus_wsclient_la_CFLAGS = $(transports_cflags)
+transports_libjanus_wsclient_la_LDFLAGS = $(transports_ldflags) $(WS_MANUAL_LIBS)
+transports_libjanus_wsclient_la_LIBADD = $(transports_libadd)
+endif
+
 if ENABLE_RABBITMQ
 transport_LTLIBRARIES += transports/libjanus_rabbitmq.la
 transports_libjanus_rabbitmq_la_SOURCES = transports/janus_rabbitmq.c

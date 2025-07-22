@@ -132,11 +132,20 @@ static janus_transport janus_http_transport_plugin =
 		.query_transport = NULL,		\
 		## __VA_ARGS__ }
 
+#define JANUS_WSCLIENT_TRANSPORT_INIT(...) {		\
+		.init = NULL,					\
+		.destroy = NULL,				\
+		.send_message = NULL,			\
+		## __VA_ARGS__ }
 
 /*! \brief Callbacks to contact the Janus core */
 typedef struct janus_transport_callbacks janus_transport_callbacks;
 /*! \brief The transport plugin session and callbacks interface */
 typedef struct janus_transport janus_transport;
+/*! \brief Callbacks to contact the Janus core */
+typedef struct janus_wsclient_transport_callbacks janus_wsclient_transport_callbacks;
+/*! \brief The transport plugin session and callbacks interface */
+typedef struct janus_wsclient_transport janus_wsclient_transport;
 /*! \brief Transport-Gateway session mapping */
 typedef struct janus_transport_session janus_transport_session;
 
@@ -299,7 +308,32 @@ struct janus_transport_callbacks {
 	void (* const notify_event)(janus_transport *plugin, void *transport, json_t *event);
 };
 
+/*! \brief The transport plugin session and callbacks interface */
+struct janus_wsclient_transport {
+	/*! \brief Transport plugin initialization/constructor
+	 * @param[in] callback The callback instance the transport plugin can use to contact the Janus core
+	 * @returns 0 in case of success, a negative integer in case of error */
+	void * (* const init)(char *instance_ip, guint16 instance_port, void *user_data);
+	/*! \brief Transport plugin deinitialization/destructor */
+	void (* const destroy)(void *transport);
+	int (* const send_message)(void *transport, json_t *msg, gboolean is_text);
+};
+
+/*! \brief Callbacks to contact the Janus core */
+struct janus_wsclient_transport_callbacks {
+	/*! \brief Callback to notify a new incoming request
+	 * @param[in] handle The transport session that should be associated to this client
+	 * @param[in] transport Pointer to the transport session instance that received the event
+	 * @param[in] request_id Opaque pointer to a transport plugin specific value that identifies this request, so that an incoming response coming later can be matched
+	 * @param[in] admin Whether this is an admin API or a Janus API request
+	 * @param[in] message The message data as a Jansson json_t object */
+	void (* const push_conf_events)(char *in, size_t len, void *user);
+};
+
 /*! \brief The hook that transport plugins need to implement to be created from the Janus core */
 typedef janus_transport* create_t(void);
+
+/*! \brief The hook that transport plugins need to implement to be created from the Janus core */
+typedef janus_wsclient_transport* wsclient_create_t(janus_wsclient_transport_callbacks *callback);
 
 #endif

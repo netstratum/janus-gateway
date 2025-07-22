@@ -213,11 +213,18 @@ static janus_plugin janus_echotest_plugin =
 		.query_session = NULL, 			\
 		## __VA_ARGS__ }
 
+#define JANUS_CONF_PLUGIN_INIT(...) {		\
+		.handle_conf_message = NULL,			\
+		## __VA_ARGS__ }
 
 /*! \brief Callbacks to contact the Janus core */
 typedef struct janus_callbacks janus_callbacks;
+/*! \brief Callbacks to contact the Janus core */
+typedef struct janus_conf_callbacks janus_conf_callbacks;
 /*! \brief The plugin session and callbacks interface */
 typedef struct janus_plugin janus_plugin;
+/*! \brief The plugin session and callbacks interface */
+typedef struct janus_conf_plugin janus_conf_plugin;
 /*! \brief Plugin-Gateway session mapping */
 typedef struct janus_plugin_session janus_plugin_session;
 /*! \brief Result of individual requests passed to plugins */
@@ -243,6 +250,7 @@ struct janus_plugin_session {
 	void *plugin_handle;
 	/*! \brief Whether this mapping has been stopped definitely or not: if so,
 	 * the plugin shouldn't make use of it anymore */
+	void *core_session;
 	volatile gint stopped;
 	/*! \brief Reference counter for this instance */
 	janus_refcount ref;
@@ -350,6 +358,12 @@ struct janus_plugin {
 
 };
 
+/*! \brief The plugin session and callbacks interface */
+struct janus_conf_plugin {
+	void (* const handle_conf_message)(char *in, size_t len, void *user);
+	void * (* const get_handle)(void *user);
+};
+
 /*! \brief Callbacks to contact the Janus core */
 struct janus_callbacks {
 	/*! \brief Callback to push events/messages to a peer
@@ -428,9 +442,32 @@ struct janus_callbacks {
 	gboolean (* const auth_signature_contains)(janus_plugin *plugin, const char *token, const char *descriptor);
 };
 
+/*! \brief Callbacks to contact the Janus core */
+struct janus_conf_callbacks {
+	/*! \brief Callback to push events/messages to a peer
+	 * @note The Janus core increases the references to both the message and jsep
+	 * json_t objects. This means that you'll have to decrease your own
+	 * reference yourself with a \c json_decref after calling push_event.
+	 * @param[in] handle The plugin/gateway session used for this peer
+	 * @param[in] plugin The plugin instance that is sending the message/event
+	 * @param[in] transaction The transaction identifier this message refers to
+	 * @param[in] message The json_t object containing the JSON message
+	 * @param[in] jsep The json_t object containing the JSEP type, the SDP attached to the message/event, if any (offer/answer), and whether this is an update */
+	void *(* const conf_init)(char *instance_ip, guint16 instance_port, void * user_data);
+	int (* const send_request)(void *ws_data, json_t *message);
+	int (* const send_request_with_jsep)(void *ws_data, json_t *message, janus_plugin_session *plugin_session, json_t *jsep);
+	int (* const conf_clear_session)(void *ws_data, void *core_session);
+	janus_plugin_session *(* const create_new_session)(void);
+	int (* const conf_clear_handle)(janus_plugin_session *plugin_session, void *core_session, const char *message_text);
+	guint64 (* const get_session_id)(janus_plugin_session *plugin_session);
+	guint64 (* const get_handle_id)(janus_plugin_session *plugin_session);
+	int (* const keepalive_session)(void *core_session);
+};
+
 /*! \brief The hook that plugins need to implement to be created from the Janus core */
 typedef janus_plugin* create_p(void);
 
+typedef janus_conf_plugin *conf_create_p(janus_conf_callbacks *callback);
 
 /** @name Janus plugin results
  * @brief When a client sends a message to a plugin (e.g., a request or a

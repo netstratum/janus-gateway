@@ -422,6 +422,9 @@ plugins: {
 # transports are enabled and loaded at startup.
 transports: {
 	#disable = "libjanus_rabbitmq.so"
+	# Added below line to avoid loading ws_client module from config. 
+	#Also, added some hardcoded lines in janus.c file to load this module.
+	disable = "libjanus_wsclient.so"
 }
 
 # As a core feature, Janus can log either on the standard output, or to
