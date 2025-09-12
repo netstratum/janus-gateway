@@ -2638,7 +2638,6 @@ void janus_sip_setup_media(janus_plugin_session *handle) {
 
 void janus_sip_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *packet) {
 	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
-		JANUS_LOG(LOG_ERR, "TEST:something went wrong...\n");
 		return;
 	}
 	if(gateway) {
@@ -2664,7 +2663,7 @@ void janus_sip_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *pack
 		}
 
 		if(!janus_sip_call_is_established(session)) {
-			JANUS_LOG(LOG_ERR, "TEST: call session not established...\n");
+			JANUS_LOG(LOG_ERR, "call session not established...\n");
 			return;
 		}
 		
@@ -2801,8 +2800,10 @@ void janus_sip_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *pa
 			return;
 		}
 
-		if(!janus_sip_call_is_established(session))
+		if(!janus_sip_call_is_established(session)) {
+			JANUS_LOG(LOG_ERR, "call session not established...\n");
 			return;
+		}
 
 		gboolean video = packet->video;
 		char *buf = packet->buffer;
@@ -2991,7 +2992,7 @@ static void janus_sip_hangup_media_internal(janus_plugin_session *handle) {
 	}
 	/* Involve SIP if needed */
 	janus_mutex_lock(&session->mutex);
-	JANUS_LOG(LOG_INFO, "TEST: janus_sip_hangup_media_internal\n");
+	JANUS_LOG(LOG_DBG, "TEST: janus_sip_hangup_media_internal\n");
 	if(session->stack != NULL && session->stack->s_nh_i != NULL && session->callee != NULL) {
 		g_free(session->callee);
 		session->callee = NULL;
@@ -3330,7 +3331,9 @@ static void *janus_sip_handler(void *data) {
 				g_snprintf(error_cause, 512, "Invalid user address %s\n", username_text);
 				goto error;
 			}
+
 			g_strlcpy(user_id, username_uri.url->url_user, sizeof(user_id));
+
 			if(guest) {
 				/* Not needed, we can stop here: just say we're registered */
 				JANUS_LOG(LOG_INFO, "Guest will have username %s\n", user_id);
@@ -5266,7 +5269,7 @@ static void *janus_sip_handler(void *data) {
 			
 		} else if(!strcasecmp(request_text, "split")) {
 			if (session->leg_thread) {
-				JANUS_LOG(LOG_INFO, "TEST: Splitting call leg type \n");
+				JANUS_LOG(LOG_DBG, "Splitting call leg type \n");
 				janus_sip_conf_leg_thread_t *conf_leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
 				room_id = conf_leg_thread->room_id;
 				g_atomic_int_set(&conf_leg_thread->conference_ended, TRUE);
@@ -5559,6 +5562,7 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				nua_respond(nh, 500, sip_status_phrase(500), TAG_END());
 				break;
 			}
+
 			if(sip->sip_from == NULL || sip->sip_from->a_url->url_user == NULL ||
 					sip->sip_to == NULL || sip->sip_to->a_url->url_user == NULL) {
 				JANUS_LOG(LOG_ERR, "\tInvalid request (missing From or To)\n");
@@ -5665,6 +5669,7 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				nua_respond(nh, 500, sip_status_phrase(500), TAG_END());
 				break;
 			}
+			
 			if(sip->sip_from == NULL || sip->sip_from->a_url->url_user == NULL ||
 					sip->sip_to == NULL || sip->sip_to->a_url->url_user == NULL) {
 				JANUS_LOG(LOG_ERR, "\tInvalid request (missing From or To)\n");
@@ -8362,12 +8367,11 @@ static void *janus_conf_thread(void *data) {
 		    g_usleep(10000); // Sleep for 10ms
 		}
 	}
-	JANUS_LOG(LOG_INFO, "TEST: conference thread: end loop\n");
 	conf_gateway->conf_clear_handle(janus_sip_conf_leg_thread->plugin_session, janus_sip_conf_leg_thread->core_session, "detach");
 	send_success_event(janus_sip_conf_leg_thread->session, janus_sip_conf_leg_thread->room_id, "splitted");
 	conf_gateway->conf_clear_session(janus_sip_conf_leg_thread->ws_data, janus_sip_conf_leg_thread->core_session);
 	janus_sip_conf_leg_thread->core_session = NULL;
-	JANUS_LOG(LOG_INFO, "TEST: conference thread: exit\n");
+	JANUS_LOG(LOG_DBG, "TEST: conference thread: exit\n");
 
 done:
 	janus_sip_conf_leg_thread->session->leg_thread = NULL;
