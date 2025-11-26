@@ -4308,7 +4308,7 @@ static gboolean janus_ice_outgoing_rtcp_handle(gpointer user_data) {
 			sr->si.s_packets = htonl(medium->out_stats.info[0].packets);
 			sr->si.s_octets = htonl(medium->out_stats.info[0].bytes);
 			rtcp_sdes *sdes = (rtcp_sdes *)&rtcpbuf[srlen];
-			janus_rtcp_sdes_cname((char *)sdes, sdeslen, "janus", 5);
+			janus_rtcp_sdes_cname((char *)sdes, sdeslen, "hoolva", 6);
 			sdes->chunk.ssrc = htonl(medium->ssrc);
 			/* Enqueue it, we'll send it later */
 			janus_plugin_rtcp rtcp = { .mindex = medium->mindex,

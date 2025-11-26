@@ -1684,18 +1684,18 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 				if(medium->msid && medium->mstid) {
 					a = janus_sdp_attribute_create("msid", "%s %s", medium->msid, medium->mstid);
 				} else {
-					a = janus_sdp_attribute_create("msid", "janus janus%s", medium->mid);
+					a = janus_sdp_attribute_create("msid", "hoolva hoolva%s", medium->mid);
 				}
 				m->attributes = g_list_append(m->attributes, a);
 			}
 			if(medium->ssrc > 0) {
-				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janus", medium->ssrc);
+				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:hoolva", medium->ssrc);
 				m->attributes = g_list_append(m->attributes, a);
 				if(medium->ssrc_rtx > 0 && m->type == JANUS_SDP_VIDEO &&
 						janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX) &&
 						(m->direction == JANUS_SDP_DEFAULT || m->direction == JANUS_SDP_SENDRECV || m->direction == JANUS_SDP_SENDONLY)) {
 					/* Add rtx SSRC group to negotiate the RFC4588 stuff */
-					a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janus", medium->ssrc_rtx);
+					a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:hoolva", medium->ssrc_rtx);
 					m->attributes = g_list_append(m->attributes, a);
 				}
 			}
