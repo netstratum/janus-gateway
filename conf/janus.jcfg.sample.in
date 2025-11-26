@@ -60,6 +60,14 @@ general: {
 	#interface = "1.2.3.4"			# Interface to use (will be used in SDP)
 	#server_name = "MyJanusInstance"# Public name of this Janus instance
 									# as it will appear in an info request
+	#app_put_url = "http://appserver/putapi"
+	#app_del_url = "http://appserver/delapi"
+	#app_req_timeout = 5			# application registration request timeout in seconds
+	#app_cookie = "MyAppCookie"
+	#ws_port = 8188
+	#http_port = 8088
+	#admin_http_port = 7088
+	#ws_ip = "192.168.0.1"
 	#session_timeout = 60			# How long (in seconds) we should wait before
 									# deciding a Janus session has timed out. A
 									# session times out when no request is received
