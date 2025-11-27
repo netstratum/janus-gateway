@@ -5446,6 +5446,112 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			janus_sip_save_reason(sip, session);
 			break;
 		}
+				
+		case nua_i_update: {
+			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
+			if(ssip == NULL) {
+				JANUS_LOG(LOG_ERR, "\tInvalid SIP stack\n");
+				nua_respond(nh, 500, sip_status_phrase(500), TAG_END());
+				break;
+			}
+
+			if(sip->sip_from == NULL ||	sip->sip_to == NULL) {
+				JANUS_LOG(LOG_ERR, "\tInvalid request (missing From or To)\n");
+				nua_respond(nh, 400, sip_status_phrase(400), TAG_END());
+				break;
+			}
+
+			if(session->stack->s_nh_i && session->stack->s_nh_i == nh) {
+					/* re-INVITE, we'll check what changed later */
+					JANUS_LOG(LOG_VERB, "Got a UPDATE...\n");
+			} else {
+					JANUS_LOG(LOG_ERR, "\tInternal Error\n");
+					nua_respond(nh, 500, sip_status_phrase(500), TAG_END());
+					break;
+			}
+
+			/* Check if there's an SDP to process */
+			janus_sdp *sdp = NULL;
+			if(!sip->sip_payload) {
+				JANUS_LOG(LOG_VERB,"Received offerless %s\n", "UPDATE");
+			} else {
+				char sdperror[100];
+				sdp = janus_sdp_parse(sip->sip_payload->pl_data, sdperror, sizeof(sdperror));
+				if(!sdp) {
+					JANUS_LOG(LOG_ERR, "\tError parsing SDP! %s\n", sdperror);
+					g_atomic_int_set(&session->establishing, 0);
+					nua_respond(nh, 488, sip_status_phrase(488), TAG_END());
+					break;
+				}
+			}
+
+			// if(janus_sip_call_is_established(session)) {
+			// 	JANUS_LOG(LOG_VERB, "respond UPDATE with 200 OK...\n");
+			// 	nua_respond(nh, 200, sip_status_phrase(200), TAG_END());
+			// } else {
+			// 	JANUS_LOG(LOG_VERB, "respond UPDATE with 405 Method not allowed...\n");
+			// 	nua_respond(nh, 405, sip_status_phrase(405), TAG_END());
+			// }
+			/* Check if there's an isfocus feature parameter in the Contact header */
+			gboolean is_focus = FALSE;
+			if(sip->sip_contact && sip->sip_contact->m_params) {
+					int i=0;
+					for(i=0; sip->sip_contact->m_params[i]; i++) {
+							if(!strcasecmp(sip->sip_contact->m_params[i], "isfocus")) {
+									/* The peer is a conference bridge */
+									is_focus = TRUE;
+									break;
+							}
+					}
+			}
+
+			/* Notify the application about the re-INVITE callInfo*/
+			json_t *call = json_object();
+			json_object_set_new(call, "sip", json_string("event"));
+			json_t *calling = json_object();
+			json_object_set_new(calling, "event", json_string("updatingcallinfo"));
+			json_object_set_new(calling, "username", json_string(session->callee));
+			if(sip->sip_from->a_url) {
+					char *ev_caller_text = url_as_string(session->stack->s_home, sip->sip_from->a_url);
+					json_object_set_new(calling, "updatedusername", json_string(ev_caller_text));
+					su_free(session->stack->s_home, ev_caller_text);
+			}
+			if(session->callid)
+					json_object_set_new(calling, "call_id", json_string(session->callid));
+			if(sip->sip_from->a_display) {
+					json_object_set_new(calling, "displayname", json_string(sip->sip_from->a_display));
+			}
+			char *callee_text = url_as_string(session->stack->s_home, sip->sip_to->a_url);
+			json_object_set_new(calling, "callee", json_string(callee_text));
+			su_free(session->stack->s_home, callee_text);
+
+			if(session->incoming_header_prefixes) {
+					json_t *headers = janus_sip_get_incoming_headers(sip, session);
+					json_object_set_new(calling, "headers", headers);
+			}
+			char *referred_by = NULL;
+			if(sip->sip_referred_by) {
+					char *rby_text = sip_header_as_string(session->stack->s_home, (const sip_header_t *)sip->sip_referred_by);
+					referred_by = g_strdup(rby_text);
+					su_free(session->stack->s_home, rby_text);
+					json_object_set_new(calling, "referred_by", json_string(referred_by));
+			}
+			if(sip->sip_replaces && sip->sip_replaces->rp_call_id) {
+					json_object_set_new(calling, "replaces", json_string(sip->sip_replaces->rp_call_id));
+			}
+			if(is_focus)
+					json_object_set_new(calling, "isfocus", json_true());
+
+			json_object_set_new(call, "result", calling);
+			json_object_set_new(call, "call_id", json_string(session->callid));
+			int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->transaction, call, NULL);
+			JANUS_LOG(LOG_VERB, "  >> Pushing event to peer: %d (%s)\n", ret, janus_get_api_error(ret));
+			json_decref(call);
+			g_free(referred_by);
+			janus_sdp_destroy(sdp);
+
+			break;
+		}
 		case nua_i_invite: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
 			/* Add a reference for this call */
@@ -5606,7 +5712,8 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 					break;
 				}
 			}
-			if(reinvite && session->media.autoaccept_reinvites) {
+			
+			if(reinvite && (!sdp || session->media.autoaccept_reinvites)) {
 				/* No need to involve the application: we reply ourselves */
 				nua_respond(nh, 200, sip_status_phrase(200), TAG_END());
 				/* Check if there's an isfocus feature parameter in the Contact header */
