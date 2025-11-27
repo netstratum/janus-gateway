@@ -1304,7 +1304,17 @@ int janus_process_incoming_request(janus_request *request) {
 		handle = janus_session_handles_find(session, handle_id);
 		if(!handle) {
 			JANUS_LOG(LOG_ERR, "Couldn't find any handle %"SCNu64" in session %"SCNu64"...\n", handle_id, session_id);
+			if(!strcasecmp(message_text, "handle_exists")) {
+				/* Prepare JSON reply */
+				json_t *reply = janus_create_message("success", session_id, transaction_text);
+				json_t *data = json_object();
+				json_object_set_new(data, "exists", json_false());
+				json_object_set_new(reply, "data", data);
+				/* Send the success reply */
+				ret = janus_process_success(request, reply);
+			} else {
 			ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_HANDLE_NOT_FOUND, "No such handle %"SCNu64" in session %"SCNu64"", handle_id, session_id);
+			}
 			goto jsondone;
 		}
 	}
@@ -2079,6 +2089,14 @@ trickledone:
 		janus_mutex_unlock(&handle->mutex);
 		/* We reply right away, not to block the web server... */
 		json_t *reply = janus_create_message("ack", session_id, transaction_text);
+		/* Send the success reply */
+		ret = janus_process_success(request, reply);
+	} else if(!strcasecmp(message_text, "handle_exists")) {
+		/* Prepare JSON reply */
+		json_t *reply = janus_create_message("success", session_id, transaction_text);
+		json_t *data = json_object();
+		json_object_set_new(data, "exists", json_true());
+		json_object_set_new(reply, "data", data);
 		/* Send the success reply */
 		ret = janus_process_success(request, reply);
 	} else {
