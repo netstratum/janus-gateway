@@ -5834,6 +5834,11 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			json_t *calling = json_object();
 			json_object_set_new(calling, "event", json_string(reinvite ? "updatingcall" : "incomingcall"));
 			json_object_set_new(calling, "username", json_string(session->callee));
+			if(reinvite && sip->sip_from->a_url) {
+				char *ev_caller_text = url_as_string(session->stack->s_home, sip->sip_from->a_url);
+				json_object_set_new(calling, "updatedusername", json_string(ev_caller_text));
+				su_free(session->stack->s_home, ev_caller_text);
+			}
 			if(session->callid)
 				json_object_set_new(calling, "call_id", json_string(session->callid));
 			if(sip->sip_from->a_display) {
