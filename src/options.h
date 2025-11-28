@@ -45,6 +45,16 @@ typedef struct janus_options {
 	const char *rtp_port_range;
 	int twcc_period;
 	const char *server_name;
+	guint server_instance;
+	guint node_number;
+	const char *app_put_url;
+	const char *app_del_url;
+	const char *app_cookie;
+	guint64 app_req_timeout;
+	guint16 http_port;
+	guint16 ws_port;
+	guint16 admin_http_port;
+	const char *ws_ip;
 	int session_timeout;
 	int reclaim_session_timeout;
 	int debug_level;

@@ -4765,11 +4765,17 @@ gint main(int argc, char *argv[]) {
 	if(options.server_name)
 		janus_config_add(config, config_general, janus_config_item_create("server_name", options.server_name));
 	janus_config_item *item = janus_config_get(config, config_general, janus_config_type_item, "server_name");
-	if(item && item->value)
+	if(item && item->value) {
 		server_name = g_strdup(item->value);
 	}
 
-		/* Check if a custom server instance value was specified */
+	/* Check if a custom server instance value was specified */
+	if(options.server_instance > 0)  {
+		char st[20];
+		g_snprintf(st, 20, "%d", options.server_instance);
+		janus_config_add(config, config_general, janus_config_item_create("server_instance", st));
+	}
+	/* Check if a custom server instance value was specified */
 	item = janus_config_get(config, config_general, janus_config_type_item, "server_instance");
 	if(item && item->value) {
 		int instance = atoi(item->value);
@@ -4777,6 +4783,11 @@ gint main(int argc, char *argv[]) {
 			JANUS_LOG(LOG_WARN, "server_instance value is less or equal to zero. set default value 1\n");
 		} else {
 			server_instance = instance;
+		}
+		if(options.node_number > 0)  {
+			char st[20];
+			g_snprintf(st, 20, "%d", options.node_number);
+			janus_config_add(config, config_general, janus_config_item_create("node_number", st));
 		}
 		item = janus_config_get(config, config_general, janus_config_type_item, "node_number");
 		if(item && item->value) {
@@ -6096,18 +6107,29 @@ gint main(int argc, char *argv[]) {
 		exit(1);	/* FIXME Should we really give up? */
 	}
 
+	if(options.app_put_url) 		
+		janus_config_add(config, config_general, janus_config_item_create("app_put_url", options.app_put_url));
+
 	/* Check if a custom websocket port value was specified */
 	item = janus_config_get(config, config_general, janus_config_type_item, "app_put_url");
 	if(item && item->value) {
 		char *app_put_url = NULL;
 		app_put_url = (char *)item->value;
-		
+
+		if(options.app_del_url) 		
+			janus_config_add(config, config_general, janus_config_item_create("app_del_url", options.app_del_url));
+
 		item = janus_config_get(config, config_general, janus_config_type_item, "app_del_url");
 		if(item && item->value) {
 			app_del_url = g_strdup(item->value);
 		}
-
+ 
 		uint16_t wsport = 8188;
+		if(options.ws_port > 0)  {
+			char st[20];
+			g_snprintf(st, 20, "%d", options.ws_port);
+			janus_config_add(config, config_general, janus_config_item_create("ws_port", st));
+		}
 		item = janus_config_get(config, config_general, janus_config_type_item, "ws_port");
 		if(item && item->value && janus_string_to_uint16(item->value, &wsport) < 0) {
 			JANUS_LOG(LOG_ERR, "Invalid port (%s), falling back to default\n", item->value);
@@ -6126,18 +6148,31 @@ gint main(int argc, char *argv[]) {
 		// if(item && item->value && janus_string_to_uint16(item->value, &adminhttpport) < 0) {
 		// 	JANUS_LOG(LOG_ERR, "Invalid port (%s), falling back to default\n", item->value);
 		// 	adminhttpport = 7088;
-		// }
-		char *ws_ip = NULL;
+		// }	
+		
+        char *ws_ip = NULL;
+		if(options.ws_ip) 		
+			janus_config_add(config, config_general, janus_config_item_create("ws_ip", options.ws_ip));
+
 		item = janus_config_get(config, config_general, janus_config_type_item, "ws_ip");
 		if(item && item->value) {
 			ws_ip = (char *)item->value;
 		}
 		
+		if(options.app_req_timeout > 0)  {
+			char st[20];
+			g_snprintf(st, 20, "%ld", options.app_req_timeout);
+			janus_config_add(config, config_general, janus_config_item_create("app_req_timeout", st));
+		}
+
 		item = janus_config_get(config, config_general, janus_config_type_item, "app_req_timeout");
 		if(item && item->value && janus_string_to_uint16(item->value, (uint16_t *)&app_req_timeout) < 0) {
 			JANUS_LOG(LOG_ERR, "Invalid app_req_timeout (%s), falling back to default\n", item->value);
 			app_req_timeout = 5;
 		}
+
+		if(options.app_cookie) 		
+			janus_config_add(config, config_general, janus_config_item_create("app_cookie", options.app_cookie));
 
 		//char *app_cookie = NULL;
 		item = janus_config_get(config, config_general, janus_config_type_item, "app_cookie");
