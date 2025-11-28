@@ -32,6 +32,17 @@
 #include "mach_gettime.h"
 #endif
 
+#define DEFAULT_NODE_NUMBER	1
+#define DEFAULT_SERVER_INSTANCE	1
+
+#define JS_SAFE_MAX ((guint64)9007199254740991ULL) /* 2^53 - 1 */
+#define TEN_TO_THE_POW_OF_TWELVE ((guint64)1000000000000ULL) /* 10^12 */
+
+/* Node number (1..9) and instance number (1..99) - provide these in your app.
+ * They can be globals or read from a config. */
+static guint nodenum = DEFAULT_NODE_NUMBER;   /* expected values: 1 .. 9 */
+static guint instance = DEFAULT_SERVER_INSTANCE;  /* expected values: 1 .. 99 */
+
 gint64 janus_get_monotonic_time_internal(void) {
 	struct timespec ts;
 	clock_gettime (CLOCK_MONOTONIC, &ts);
@@ -91,6 +102,11 @@ guint32 janus_random_uint32(void) {
 	return ret;
 }
 
+void janus_init_server_instance(guint node_num, guint server_instance) {
+	nodenum = node_num;
+	instance = server_instance;
+}
+
 guint64 janus_random_uint64_full(void) {
 	guint64 ret = 0;
 	if(RAND_bytes((void *)&ret, sizeof(ret)) != 1) {
@@ -100,8 +116,42 @@ guint64 janus_random_uint64_full(void) {
 	return ret;
 }
 
+/* Compose a value: <nodenum (1 digit)><instance (2 digits, zero-padded)><random 12 digits>.
+ * Example: node=3, instance=7, random tail=000000123456 -> 307000000123456
+ *
+ * This guarantees the returned value <= JS_SAFE_MAX and preserves uniqueness across
+ * node & instance ranges requested.
+ */
 guint64 janus_random_uint64(void) {
-	return janus_random_uint64_full() & 0x1FFFFFFFFFFFFF;
+    /* Validate/canonicalize nodenum and instance to allowed ranges.
+     * - If they are out of range, we wrap them into the allowed range using modulo,
+     *   but ensure result is in 1..max (so modulo result 0 becomes max or 1 as needed).
+     * You can change this behavior to clamp instead of wrap if you prefer. */
+    guint node = (nodenum % 10); /* yields 0..9 */
+    if (node == 0) node = 1;     /* map 0 -> 1 so result in 1..9 */
+
+    guint inst = (instance % 100); /* yields 0..99 */
+    if (inst == 0) inst = 1;       /* map 0 -> 1 so result in 1..99 */
+
+    /* prefix is a 3-digit number: node * 100 + inst (e.g. node=3,inst=7 => 307) */
+    guint prefix = (node * 100u) + inst; /* max 999 */
+
+    /* get a 64-bit random and reduce to 0 .. 10^12-1 tail */
+    guint64 rnd = janus_random_uint64_full();
+    guint64 tail = rnd % TEN_TO_THE_POW_OF_TWELVE;
+
+    /* Compose final value: (prefix * 10^12) + tail */
+    guint64 result = ((guint64)prefix * TEN_TO_THE_POW_OF_TWELVE) + tail;
+
+    /* Sanity check: should always be <= JS_SAFE_MAX (and in our layout it will be).
+     * If you prefer a hard assert in debug builds, add one here. */
+    if (result > JS_SAFE_MAX) {
+        /* extremely unlikely with the chosen layout, but guard anyway */
+        JANUS_LOG(LOG_WARN, "janus_random_uint64(): composed value exceeds JS_SAFE_MAX, truncating\n");
+        result = result % (JS_SAFE_MAX + 1ULL);
+    }
+
+    return result;
 }
 
 char *janus_random_uuid(void) {

@@ -60,6 +60,9 @@ general: {
 	#interface = "1.2.3.4"			# Interface to use (will be used in SDP)
 	#server_name = "MyJanusInstance"# Public name of this Janus instance
 									# as it will appear in an info request
+	#node_number = 1				# Node number when multiple server node involved
+	#server_instance = 1			# server instace number when multiple janus instaces involved
+									# it will useful to create unique ids accross the janus instance
 	#app_put_url = "http://appserver/putapi"
 	#app_del_url = "http://appserver/delapi"
 	#app_req_timeout = 5			# application registration request timeout in seconds

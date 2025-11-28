@@ -287,6 +287,12 @@ static gchar *app_del_url = NULL;
 static gchar *app_cookie = NULL;
 uint64_t app_req_timeout = 5;
 
+
+#define DEFAULT_SERVER_INSTANCE	1
+#define DEFAULT_NODE_NUMBER		1
+static guint server_instance = DEFAULT_SERVER_INSTANCE;
+static guint node_number = DEFAULT_NODE_NUMBER;
+
 static json_t *janus_create_message(const char *status, uint64_t session_id, const char *transaction) {
 	json_t *msg = json_object();
 	json_object_set_new(msg, "janus", json_string(status));
@@ -368,6 +374,8 @@ static json_t *janus_info(const char *transaction) {
 	json_object_set_new(info, "reclaim-session-timeout", json_integer(reclaim_session_timeout));
 	json_object_set_new(info, "candidates-timeout", json_integer(candidates_timeout));
 	json_object_set_new(info, "server-name", json_string(server_name ? server_name : JANUS_SERVER_NAME));
+	json_object_set_new(info, "server-instance", json_integer(server_instance));
+	json_object_set_new(info, "node-number", json_integer(node_number));
 	json_object_set_new(info, "local-ip", json_string(local_ip));
 	guint public_ip_count = janus_get_public_ip_count();
 	if(public_ip_count > 0) {
@@ -4759,6 +4767,28 @@ gint main(int argc, char *argv[]) {
 	janus_config_item *item = janus_config_get(config, config_general, janus_config_type_item, "server_name");
 	if(item && item->value)
 		server_name = g_strdup(item->value);
+	}
+
+		/* Check if a custom server instance value was specified */
+	item = janus_config_get(config, config_general, janus_config_type_item, "server_instance");
+	if(item && item->value) {
+		int instance = atoi(item->value);
+		if(instance <= 0) {
+			JANUS_LOG(LOG_WARN, "server_instance value is less or equal to zero. set default value 1\n");
+		} else {
+			server_instance = instance;
+		}
+		item = janus_config_get(config, config_general, janus_config_type_item, "node_number");
+		if(item && item->value) {
+			int node = atoi(item->value);
+			if(node <= 0) {
+				JANUS_LOG(LOG_WARN, "node_number value is less or equal to zero. set default value 1\n");
+			} else {
+				node_number = node;
+			}
+		}
+		janus_init_server_instance(node_number, server_instance);
+	}
 
 	/* Check if we should exit immediately on dlopen or dlsym errors */
 	item = janus_config_get(config, config_general, janus_config_type_item, "exit_on_dl_error");
