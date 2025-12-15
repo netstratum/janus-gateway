@@ -69,7 +69,7 @@ static int callback_wsclient(struct lws *wsi, enum lws_callback_reasons reason,
 			// 	return 0;
 #if (LWS_LIBRARY_VERSION_MAJOR >= 4)
 			/* Refresh the lws connection validity (avoid sending a ping) */
-			lws_validity_confirmed(session->wsi);
+			lws_validity_confirmed(wsi);
 #endif
 			/* Is this a new message, or part of a fragmented one? */
 			const size_t remaining = lws_remaining_packet_payload(wsi);

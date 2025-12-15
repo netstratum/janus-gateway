@@ -2663,7 +2663,7 @@ void janus_sip_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *pack
 		}
 
 		if(!janus_sip_call_is_established(session)) {
-			JANUS_LOG(LOG_ERR, "call session not established...\n");
+			//JANUS_LOG(LOG_ERR, "call session not established...\n");
 			return;
 		}
 		
@@ -2801,7 +2801,7 @@ void janus_sip_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *pa
 		}
 
 		if(!janus_sip_call_is_established(session)) {
-			JANUS_LOG(LOG_ERR, "call session not established...\n");
+			//JANUS_LOG(LOG_ERR, "call session not established...\n");
 			return;
 		}
 
@@ -7772,7 +7772,8 @@ static void *janus_sip_relay_thread(void *data) {
 						janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
 						if (session->connection_type == janus_session_connection_initiator) {
 							//JANUS_LOG(LOG_INFO, "[SIP-%s] Relaying audio RTP packet to %s:%d\n", session->account.username, leg_thread->instance_ip, leg_thread->instance_port);
-							gateway->relay_rtp(leg_thread->plugin_session, &rtp);
+							if (leg_thread && leg_thread->plugin_session)
+								gateway->relay_rtp(leg_thread->plugin_session, &rtp);
 						} else {
 							gateway->relay_rtp(session->handle, &rtp);	
 						}
@@ -7872,7 +7873,8 @@ static void *janus_sip_relay_thread(void *data) {
 					if (session->leg_thread) {
 						janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
 						if (session->connection_type == janus_session_connection_initiator) {
-							gateway->relay_rtp(leg_thread->plugin_session, &rtp);
+							if (leg_thread && leg_thread->plugin_session)
+								gateway->relay_rtp(leg_thread->plugin_session, &rtp);
 						} else {
 							gateway->relay_rtp(session->handle, &rtp);
 						}
@@ -8363,6 +8365,7 @@ static void *janus_conf_thread(void *data) {
 			}
 		    g_usleep(10000); // Sleep for 10ms
 		}
+	    g_usleep(10000); // Sleep for 10ms
 	}
 	conf_gateway->conf_clear_handle(janus_sip_conf_leg_thread->plugin_session, janus_sip_conf_leg_thread->core_session, "detach");
 	send_success_event(janus_sip_conf_leg_thread->session, janus_sip_conf_leg_thread->room_id, "splitted");
@@ -8371,10 +8374,13 @@ static void *janus_conf_thread(void *data) {
 	JANUS_LOG(LOG_DBG, "TEST: conference thread: exit\n");
 
 done:
-	janus_sip_conf_leg_thread->session->leg_thread = NULL;
-	session->leg_thread = NULL;
-
-	if (error_code) {
+	if (janus_sip_conf_leg_thread && janus_sip_conf_leg_thread->session) {
+        janus_sip_conf_leg_thread->session->leg_thread = NULL;
+    }
+    if (session) {
+        session->leg_thread = NULL;
+    }
+	if (error_code && janus_sip_conf_leg_thread && janus_sip_conf_leg_thread->session) {
 		send_error_event(janus_sip_conf_leg_thread->session, janus_sip_conf_leg_thread->room_id, error_code, error_cause);
 	}
 	//TODO: janus_refcount_decrease(&janus_sip_conf_leg_thread->ref);

@@ -1259,6 +1259,7 @@ guint64 janus_conf_get_handle_id(janus_plugin_session *plugin_session) {
 	return ice_handle->handle_id;
 }
 
+
 janus_session *janus_session_create(guint64 session_id) {
 	janus_session *session = NULL;
 	if(session_id == 0) {
