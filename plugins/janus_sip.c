@@ -2313,6 +2313,10 @@ void janus_sip_create_session(janus_plugin_session *handle, int *error) {
 	session->media.video_remote_policy.ssrc.type = ssrc_any_inbound;
 	session->media.video_local_policy.ssrc.type = ssrc_any_inbound;
 	janus_mutex_init(&session->rec_mutex);
+	session->arc = NULL;
+	session->arc_peer = NULL;
+	session->vrc = NULL;
+	session->vrc_peer = NULL;
 	g_atomic_int_set(&session->establishing, 0);
 	g_atomic_int_set(&session->established, 0);
 	g_atomic_int_set(&session->hangingup, 0);
@@ -7808,7 +7812,8 @@ static void *janus_sip_relay_thread(void *data) {
 					if (session->leg_thread) {
 						janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
 						if (session->connection_type == janus_session_connection_initiator) {
-							gateway->relay_rtcp(leg_thread->plugin_session, &rtcp);
+							if (leg_thread && leg_thread->plugin_session)
+								gateway->relay_rtcp(leg_thread->plugin_session, &rtcp);
 						} else {
 							gateway->relay_rtcp(session->handle, &rtcp);
 						}
@@ -7908,7 +7913,8 @@ static void *janus_sip_relay_thread(void *data) {
 					if (session->leg_thread) {
 						janus_sip_conf_leg_thread_t *leg_thread = (janus_sip_conf_leg_thread_t *)session->leg_thread;
 						if (session->connection_type == janus_session_connection_initiator) {
-							gateway->relay_rtcp(leg_thread->plugin_session, &rtcp);
+							if (leg_thread && leg_thread->plugin_session)
+								gateway->relay_rtcp(leg_thread->plugin_session, &rtcp);
 						} else {
 							gateway->relay_rtcp(session->handle, &rtcp);
 						}
