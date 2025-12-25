@@ -1415,7 +1415,7 @@ int janus_rtcp_sdes_cname(char *packet, int len, const char *cname, int cnamelen
 	/* calculate padding length. assume that plen is shorter than 65535 */
 	plen = (plen + 3) & 0xFFFC;
 	if(len < plen) {
-		JANUS_LOG(LOG_ERR, "Buffer too small for SDES message: %d < %d\n", len, plen);
+		JANUS_LOG(LOG_VERB, "Buffer too small for SDES message: %d < %d\n", len, plen);
 		return -1;
 	}
 	rtcp->length = htons((plen/4)-1);
