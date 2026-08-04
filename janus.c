@@ -5079,6 +5079,7 @@ gint main(int argc, char *argv[])
 
 	g_print("Janus commit: %s\n", janus_build_git_sha);
 	g_print("Compiled on:  %s\n\n", janus_build_git_time);
+	g_print(">>> DEPLOY TEST: janus build by webdev - pipeline check OK <<<\n");
 
 	struct gengetopt_args_info args_info;
 	/* Let's call our cmdline parser */
